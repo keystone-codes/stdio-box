@@ -598,6 +598,24 @@ class Store:
         with self._lock:
             return audit.list_events(self._conn, since=since, profile_id=profile_id, event=event)
 
+    def write_status(self, body: dict) -> None:
+        """Replace the status row. This does not bump ``meta.revision``.
+
+        The wrapper writes this snapshot on a timer. A revision bump would look
+        like a credentials change to the instance watcher.
+        """
+        encoded = json.dumps(body, sort_keys=True, separators=(",", ":"))
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._conn.execute("DELETE FROM status")
+                self._conn.execute("INSERT INTO status (body) VALUES (?)", (encoded,))
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            secure_files(self.path)
+
     def read_status(self) -> dict | None:
         with self._lock:
             row = self._conn.execute("SELECT body FROM status LIMIT 1").fetchone()

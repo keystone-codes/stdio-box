@@ -84,7 +84,7 @@ def main(argv: list[str]) -> int:
     if os.environ.get("BOX_BEARER_TOKEN"):
         from stdio_box.cli import serve_http
 
-        serve_http()
+        serve_http(spawner=spawner, installed=args.installed)
         return 0
     _wait_until_stopped(spawner)
     return 0

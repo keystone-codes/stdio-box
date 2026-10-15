@@ -9,7 +9,8 @@ import uvicorn
 
 from stdio_box.catalog import CatalogError, build_catalog
 from stdio_box.config import Config, load_config
-from stdio_box.http_app import UnavailableForwarder, build_app
+from stdio_box.http_app import Forwarder, UnavailableForwarder, build_app
+from stdio_box.installed import InstalledServer
 from stdio_box.logs import configure_logging
 from stdio_box.provider import Provider, ProviderError, load_provider
 from stdio_box.snapshot import snapshot_main
@@ -75,7 +76,7 @@ def credsctl_main(argv: list[str] | None = None) -> None:
     run(argv)
 
 
-def serve_http() -> None:
+def serve_http(spawner: object | None = None, installed: InstalledServer | None = None) -> None:
     """Load config, open the store, and serve ``/mcp`` and ``/healthz``."""
     config = load_config(os.environ)
     configure_logging(config.log_level)
@@ -103,19 +104,112 @@ def serve_http() -> None:
         print(str(exc), file=sys.stderr)
         raise SystemExit(1) from exc
     store, schema_newer = _open_store(config, provider)
+    forwarder, whoami, background = _routing(
+        config, provider, catalog, snapshot, store, spawner, installed
+    )
     app = build_app(
         config,
         provider,
         catalog,
-        UnavailableForwarder(),
+        forwarder,
         store,
         schema_newer=schema_newer,
+        whoami=whoami,
+        background=background,
     )
     try:
         uvicorn.run(app, host="0.0.0.0", port=config.port)
     finally:
         if store is not None:
             store.close()
+
+
+def _routing(
+    config: Config,
+    provider: Provider,
+    catalog: object,
+    snapshot: object,
+    store: Store | None,
+    spawner: object | None,
+    installed: InstalledServer | None,
+) -> tuple[Forwarder, object, object]:
+    """Build the call forwarder. A store that did not open keeps the placeholder."""
+    if store is None:
+        return UnavailableForwarder(), None, None
+    argv = _child_argv(config, installed)
+    child = spawner
+    if child is None and argv:
+        from stdio_box.spawner import InlineSpawner, allowlist_for
+
+        child = InlineSpawner(allowlist_for(argv[0]))
+    if child is None or not argv:
+        return UnavailableForwarder(), None, None
+    from stdio_box.catalog import Catalog
+    from stdio_box.forward import StoreForwarder, render_whoami
+    from stdio_box.instances import InstanceManager
+    from stdio_box.resolver import resolve
+
+    if not isinstance(catalog, Catalog):
+        return UnavailableForwarder(), None, None
+    names = _snapshot_names(snapshot)
+    slot_root = getattr(child, "slot_root", "/tmp/box")
+    manager = InstanceManager(
+        child,
+        store,
+        provider,
+        catalog,
+        argv,
+        snapshot_names=names,
+        max_instances=config.max_instances,
+        idle_seconds=config.idle_seconds,
+        start_timeout_seconds=config.start_timeout_seconds,
+        slot_root=str(slot_root),
+    )
+    forwarder = StoreForwarder(
+        store,
+        provider,
+        catalog,
+        manager,
+        call_timeout_seconds=config.call_timeout_seconds,
+    )
+
+    async def _whoami(identity: object) -> object:
+        import anyio
+
+        from stdio_box._vendor.keystone_identity import KeystoneIdentity
+
+        if not isinstance(identity, KeystoneIdentity):
+            raise RuntimeError("whoami requires an identity")
+
+        def _resolve() -> object:
+            return render_whoami(provider, identity, resolve(store, provider, identity))
+
+        return await anyio.to_thread.run_sync(_resolve)
+
+    return forwarder, _whoami, manager.run
+
+
+def _child_argv(config: Config, installed: InstalledServer | None) -> list[str]:
+    if installed is not None:
+        return [installed.argv0, *installed.args]
+    if config.debug and config.child_argv_override:
+        import shlex
+
+        return shlex.split(config.child_argv_override)
+    return []
+
+
+def _snapshot_names(snapshot: object) -> frozenset[str]:
+    if not isinstance(snapshot, dict):
+        return frozenset()
+    tools = snapshot.get("tools")
+    if not isinstance(tools, list):
+        return frozenset()
+    names = []
+    for item in tools:
+        if isinstance(item, dict) and isinstance(item.get("name"), str):
+            names.append(item["name"])
+    return frozenset(names)
 
 
 def _open_store(config: Config, provider: Provider) -> tuple[Store | None, bool]:
