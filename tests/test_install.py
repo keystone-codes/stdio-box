@@ -106,7 +106,7 @@ def test_killed_install_leaves_no_complete_marker(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     sleeper = bin_dir / "uv"
-    sleeper.write_text("#!/bin/sh\nsleep 60\n", encoding="utf-8")
+    sleeper.write_text("#!/bin/sh\nexec /bin/sleep 60\n", encoding="utf-8")
     sleeper.chmod(0o755)
     cache = tmp_path / "cache"
     script = tmp_path / "hang_install.py"
