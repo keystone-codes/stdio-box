@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://keystone.codes/schemas/stdio-provider-v1.json",
+  "title": "stdio-box provider descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "name", "title", "server", "fields", "variants", "discovery"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,30}$"
+    },
+    "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "server": { "$ref": "#/$defs/server" },
+    "fields": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": { "$ref": "#/$defs/field" }
+    },
+    "variants": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/variant" }
+    },
+    "tools": { "$ref": "#/$defs/tools" },
+    "discovery": { "$ref": "#/$defs/discovery" },
+    "identity_to_child": { "enum": ["none", "meta"] }
+  },
+  "$defs": {
+    "envName": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "bin", "lock"],
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "^(uvx|npx) "
+        },
+        "bin": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+        "lock": { "enum": ["requirements.txt", "package-lock.json"] },
+        "static_env": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": { "$ref": "#/$defs/envName" },
+          "additionalProperties": { "type": "string", "maxLength": 1024 }
+        }
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "secret", "hint"],
+      "properties": {
+        "name": { "$ref": "#/$defs/envName" },
+        "type": { "enum": ["url", "string"] },
+        "secret": { "type": "boolean" },
+        "hint": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "to": {
+          "oneOf": [
+            { "type": "string", "enum": ["env"] },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["arg"],
+              "properties": {
+                "arg": { "type": "string", "pattern": "^--[a-z0-9-]+$" }
+              }
+            }
+          ]
+        },
+        "max_length": { "type": "integer", "minimum": 1, "maximum": 4096 }
+      }
+    },
+    "variant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "fields", "checks"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,20}$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "fields": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/envName" }
+        },
+        "tools": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+        },
+        "allowed_hosts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "type": "string", "minLength": 1, "maxLength": 253 }
+        },
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/check" }
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "http": { "$ref": "#/$defs/httpCheck" },
+        "tool": { "$ref": "#/$defs/toolCheck" }
+      }
+    },
+    "httpCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "url", "expect_status"],
+      "properties": {
+        "method": { "enum": ["GET", "POST"] },
+        "url": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "auth": { "$ref": "#/$defs/auth" },
+        "headers": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9-]+$"
+          },
+          "additionalProperties": { "type": "string", "maxLength": 1024 }
+        },
+        "expect_status": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": { "type": "integer", "minimum": 100, "maximum": 599 }
+        },
+        "identity": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 30 }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "maxProperties": 1,
+      "properties": {
+        "basic": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/envName" }
+        },
+        "bearer": { "$ref": "#/$defs/envName" },
+        "header": { "$ref": "#/$defs/authHeader" }
+      }
+    },
+    "authHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "field"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9-]+$"
+        },
+        "scheme": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "field": { "$ref": "#/$defs/envName" }
+      }
+    },
+    "toolCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "arguments": { "type": "object" },
+        "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 30 }
+      }
+    },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "strip_prefix": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "normalize": { "enum": ["none", "snake"] },
+        "rename": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 128 }
+        },
+        "hide": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["placeholder", "manual"] },
+        "env": {
+          "type": "object",
+          "maxProperties": 32,
+          "propertyNames": { "$ref": "#/$defs/envName" },
+          "additionalProperties": { "type": "string", "maxLength": 4096 }
+        }
+      }
+    }
+  }
+}

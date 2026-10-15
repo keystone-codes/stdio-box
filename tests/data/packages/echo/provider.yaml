@@ -1,0 +1,40 @@
+schema_version: 1
+name: echo
+title: Echo test server
+server:
+  command: "uvx echo-server==0.0.0"
+  bin: echo-server
+  lock: requirements.txt
+fields:
+  - name: ECHO_URL
+    type: url
+    secret: false
+    hint: "Address the echo server reports from ECHO_URL"
+  - name: ECHO_TOKEN
+    type: string
+    secret: true
+    hint: "Secret echoed on stderr by the spam tool"
+  - name: ECHO_EXTRA
+    type: string
+    secret: true
+    hint: "Extra secret used by the full variant"
+variants:
+  - name: token
+    title: URL and token
+    fields: [ECHO_URL, ECHO_TOKEN]
+    tools: ["who", "slow", "block", "crash", "spam", "meta", "escape", "forkbomb"]
+    allowed_hosts: ["*.invalid"]
+    checks:
+      - tool: {name: who}
+  - name: full
+    title: URL, token, and extra
+    fields: [ECHO_URL, ECHO_TOKEN, ECHO_EXTRA]
+    tools: ["who", "slow", "block", "crash", "spam", "meta", "escape", "forkbomb", "extra_tool"]
+    allowed_hosts: ["*.invalid"]
+    checks:
+      - tool: {name: who}
+discovery:
+  mode: placeholder
+  env:
+    ECHO_URL: https://echo.invalid
+    ECHO_TOKEN: discovery-placeholder

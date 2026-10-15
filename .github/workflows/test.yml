@@ -1,0 +1,75 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Lint, test, and image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+      - name: Pytest
+        run: uv run pytest -q -m "not integration"
+
+      - name: Docker build
+        run: docker build .
+
+  list-packages:
+    name: List provider directories
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.scan.outputs.packages }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - id: scan
+        run: |
+          set -euo pipefail
+          mapfile -t dirs < <(find packages -mindepth 1 -maxdepth 1 -type d | sort)
+          if [ "${#dirs[@]}" -eq 0 ]; then
+            echo 'packages=[]' >> "$GITHUB_OUTPUT"
+          else
+            json=$(printf '%s\n' "${dirs[@]}" | jq -R . | jq -s -c .)
+            echo "packages=${json}" >> "$GITHUB_OUTPUT"
+          fi
+
+  validate-providers:
+    name: Validate provider
+    needs: list-packages
+    if: needs.list-packages.outputs.packages != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: ${{ fromJson(needs.list-packages.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Validate provider
+        run: uv run stdio-box validate-provider "${{ matrix.dir }}"

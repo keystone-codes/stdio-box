@@ -1,0 +1,73 @@
+name: Tag release
+
+on:
+  push:
+    branches: [main]
+    paths: [IMAGE]
+
+permissions:
+  contents: write
+
+env:
+  IMAGE: ghcr.io/keystone-codes/stdio-box
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Read IMAGE
+        id: image
+        run: |
+          set -euo pipefail
+          ref=$(grep -E '^ghcr.io/keystone-codes/stdio-box:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$' IMAGE || true)
+          if [ -z "$ref" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version=$(printf '%s\n' "$ref" | sed -n 's/.*stdio-box:\([0-9][0-9.]*\)@sha256:.*/\1/p')
+          digest=$(printf '%s\n' "$ref" | sed -n 's/.*@\(sha256:[0-9a-f]\{64\}\)/\1/p')
+          pyver=$(python3 -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          test "$version" = "$pyver"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if tag exists
+        id: check
+        if: steps.image.outputs.skip == 'false'
+        run: |
+          v="${{ steps.image.outputs.version }}"
+          if git rev-parse "v$v" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+        if: steps.image.outputs.skip == 'false' && steps.check.outputs.skip == 'false'
+
+      - name: Verify registry digest
+        if: steps.image.outputs.skip == 'false' && steps.check.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          v="${{ steps.image.outputs.version }}"
+          expected="${{ steps.image.outputs.digest }}"
+          actual=$(docker buildx imagetools inspect "${IMAGE}:$v" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          if [ "$actual" != "$expected" ]; then
+            echo "registry digest $actual != IMAGE $expected"
+            exit 1
+          fi
+
+      - name: Create tag and release
+        if: steps.image.outputs.skip == 'false' && steps.check.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          v="${{ steps.image.outputs.version }}"
+          git tag "v$v"
+          git push origin "v$v"
+          gh release create "v$v" --generate-notes --notes "Image digest: \`${{ steps.image.outputs.digest }}\`"
