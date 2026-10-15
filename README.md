@@ -234,6 +234,104 @@ A secret field cannot be passed as a command-line argument. Credential values tr
 
 Children share the container's network. Holding another package's bearer is what would let them call that package; the network path itself is open, including to addresses outside the host.
 
+## Storage
+
+Profiles and bindings live in `<BOX_DATA_DIR>/box.sqlite3` (in the image, `/data/box.sqlite3`). The file is created mode `0600`. The database uses WAL. Tables:
+
+| Table | What it holds |
+|---|---|
+| `meta` | schema version, salt, key check, revision |
+| `profiles` | id, variant, non-secret fields, state, check result |
+| `profile_secrets` | secret fields, AES-256-GCM, one row per version |
+| `bindings` | who receives which profile, and the role order |
+| `form_links` | SHA-256 of a form token, never the token |
+| `audit` | calls and admin actions, kept for `BOX_AUDIT_RETENTION_DAYS` (30) |
+| `status` | one JSON snapshot written by the running wrapper |
+
+`BOX_STORE_KEY` is the key generated for the package (`secrets.token_urlsafe(32)`). The store derives separate 32-byte keys with HKDF-SHA256 for secrets, the key check, form CSRF, and audit subject hashes. Secret fields of one profile are a single JSON object sealed with AES-256-GCM. The nonce is random. The additional data is the profile id and the secret version, so a row cannot be moved under another profile or version.
+
+What this protects: a copy of the data volume without `BOX_STORE_KEY`. The secret fields cannot be opened.
+
+What this does not protect:
+
+- Non-secret fields (the address, the account name) are stored in the clear, as are profile ids, bindings, and audit rows.
+- The key is in the container environment. `docker inspect` shows it. Anyone who can read the running container can read the store.
+- Encryption does not hide which profile was used, only the secret values.
+
+A database written by a newer build is not opened and is not modified. An internal `/healthz` then answers 503. A request that arrived through the public domain (`X-Forwarded-Host`) gets the same status code and an empty body.
+
+## Bindings and their order
+
+The box picks one profile for a call, in this order:
+
+1. `user:<sub>` — the subject from the signed identity, lowercased. `user:svc:backend` is a service account.
+2. `role:<name>` bindings whose role is in the call, walked in the order an administrator set. The first hit wins.
+3. `default`.
+
+There is no error when several roles match. The administrator sets the order with `credsctl bind <subject> <profile> --position N`. A new role binding without `--position` goes to the end. `--replace --position N` moves an existing role binding and can point it at another profile. Removing a role binding closes the gap so positions stay `1, 2, 3` with no holes. `user:` and `default` have no position.
+
+Profile state does not affect the choice. If the first match needs its secrets entered again, the call uses that profile and fails, instead of quietly using the next account.
+
+## Moving or reinstalling a box
+
+Copy the store volume and use the same `BOX_STORE_KEY`. The process still starts if the key is different: bindings and non-secret fields stay readable, secret fields do not, and those profiles are reported as `needs_reentry`. An internal `/healthz` answers 200 with `"status": "degraded"` and `"store": "key_mismatch"`. A public-domain request gets 200 and `{}`. Enter the secrets again, or re-encrypt with the old key (below). `sub_hash` values in logs from before the key change do not match values from after it.
+
+## Backups and the key
+
+Before a schema migration the store copies the database to `<BOX_DATA_DIR>/backup/` and keeps the three newest copies. Keep a backup of the volume **separate** from `BOX_STORE_KEY`. The ciphertext is only a secret from someone who does not have the key. The key is also visible in the container environment, so a backup that includes both the volume and the key (or `docker inspect` output) is not protected.
+
+The cache volume does not hold profiles. It does not need the same treatment.
+
+## Changing the key
+
+`credsctl store rekey --old-key-file <path>` (or `-` for stdin) opens every secret row with the old key and seals it with the current `BOX_STORE_KEY`. Rows already sealed with the current key are left as they are. If you no longer have the old key, enter the secrets again; the first successful write adopts the new key, and profiles you have not rewritten stay `needs_reentry`.
+
+## credsctl
+
+`credsctl` is the operator CLI. In the container it runs as uid 10001. Started as root, it drops to that uid before it opens the database. Every command accepts `--json`. Field values are never printed. Each command that changes the store writes an audit row `event=admin`, `sub=cli:credsctl`.
+
+```
+credsctl profile list
+credsctl profile delete <id>
+credsctl profile import <id> [--variant <name>] --from-file <path|-> \
+    [--if-absent] [--ignore-unknown] [--no-check] [--description <text>]
+credsctl bind <subject> <profile> [--replace] [--position N]
+credsctl unbind <subject>
+credsctl bindings
+credsctl store status
+credsctl store rekey --old-key-file <path|->
+credsctl audit [--since 24h] [--profile <id>] [--event <name>]
+credsctl status
+```
+
+`profile import` reads an env file (`NAME=value`, blank lines and `#` comments skipped, quotes left as typed). The file must be mode `0600` unless the path is `-` (stdin). Without `--variant`, the variant is the one whose fields are exactly the non-empty provider fields in the file. A file that matches none (or more than one) is `variant_ambiguous`. Keys that are not provider fields are `unknown_fields` unless `--ignore-unknown` is set, in which case those names are skipped and listed as `ignored`. `--if-absent` on a profile that already exists exits 4 and writes nothing. Import does not bind the profile; bind is a separate command. `--no-check` skips the credential check. This build does not run the check either way: the result is `check: unreachable`, or `check: skipped` with `--no-check`.
+
+`bindings` prints `user`, then `role` with positions, then `default` — the same order a call is resolved in.
+
+`store status` reports `key_state`, `schema_version`, how many profiles there are, and how many are `needs_reentry`. `status` prints the wrapper's status row. Until the wrapper is running it is `{"status": "not running"}`.
+
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| 0 | Done. An import whose check could not reach the provider is still 0 (`check: unreachable`). |
+| 1 | The provider rejected the values. Reserved for the credential check. |
+| 2 | Usage. |
+| 3 | Invalid input: `unknown_fields`, `missing_fields`, `variant_ambiguous`, file mode, a bad id, subject, or position, `profile_in_use`, `binding_exists`. |
+| 4 | `--if-absent` and the profile already exists. |
+| 5 | The store cannot be opened, including a database newer than this program (`store_schema_newer`). |
+
+`--json` prints one object: `{"ok", "code", "error": {"id", "message"}, "result"}`. `code` is the exit code. `error` is `null` on success.
+
+Moving an account out of a deploy env file, then binding it as the default. `<service>` is the `service` field of the container whose `role` is `mcp`, from `keystonectl service status <name> --json` (`result.services[].containers[]`). Do not build that name from the package name.
+
+```sh
+docker compose exec -T <service> \
+  credsctl profile import atlassian/shared --from-file - --if-absent --ignore-unknown \
+  < jira.env
+docker compose exec -T <service> credsctl bind default atlassian/shared
+```
+
 ## Releasing
 
 `IMAGE` in the repository root is the pinned reference `ghcr.io/keystone-codes/stdio-box:<version>@sha256:<digest>`. Until the first release it has no digest line.
@@ -256,4 +354,4 @@ uv run pytest -q
 docker build .
 ```
 
-`pytest -q` includes the image-layout test, which builds an image from the echo provider under `tests/data/packages`. `pytest -q -m "not integration"` skips it. `credsctl` prints usage and exits 2 until profile commands exist.
+`pytest -q` includes the image-layout test, which builds an image from the echo provider under `tests/data/packages`. `pytest -q -m "not integration"` skips it.

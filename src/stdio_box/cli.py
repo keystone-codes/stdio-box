@@ -8,16 +8,16 @@ from pathlib import Path
 import uvicorn
 
 from stdio_box.catalog import CatalogError, build_catalog
-from stdio_box.config import load_config
+from stdio_box.config import Config, load_config
 from stdio_box.http_app import UnavailableForwarder, build_app
 from stdio_box.logs import configure_logging
-from stdio_box.provider import ProviderError, load_provider
+from stdio_box.provider import Provider, ProviderError, load_provider
+from stdio_box.store.errors import StoreSchemaNewer
+from stdio_box.store.repo import Store
 
 _USAGE = """usage: stdio-box validate-provider <provider-directory>
        stdio-box launch
        stdio-box serve"""
-
-_CREDSCTL_USAGE = "usage: credsctl <command> [<args>]"
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -42,9 +42,9 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def credsctl_main(argv: list[str] | None = None) -> None:
-    del argv
-    print(_CREDSCTL_USAGE, file=sys.stderr)
-    raise SystemExit(2)
+    from stdio_box.credsctl import credsctl_main as run
+
+    run(argv)
 
 
 def _serve(args: list[str]) -> None:
@@ -76,8 +76,39 @@ def _serve(args: list[str]) -> None:
     except CatalogError as exc:
         print(str(exc), file=sys.stderr)
         raise SystemExit(1) from exc
-    app = build_app(config, provider, catalog, UnavailableForwarder())
-    uvicorn.run(app, host="0.0.0.0", port=config.port)
+    store, schema_newer = _open_store(config, provider)
+    app = build_app(
+        config,
+        provider,
+        catalog,
+        UnavailableForwarder(),
+        store,
+        schema_newer=schema_newer,
+    )
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=config.port)
+    finally:
+        if store is not None:
+            store.close()
+
+
+def _open_store(config: Config, provider: Provider) -> tuple[Store | None, bool]:
+    """Open the profile store once, before the HTTP server accepts requests.
+
+    A database newer than this process logs ``store_schema_newer`` inside the
+    migration and is not modified. The server still starts so ``/healthz`` can
+    answer 503. A key that does not match is not an error: the store opens with
+    ``key_state`` ``key_mismatch``.
+    """
+    try:
+        store = Store.open(
+            config.data_dir,
+            config.store_key,
+            field_names=[field.name for field in provider.fields],
+        )
+    except StoreSchemaNewer:
+        return None, True
+    return store, False
 
 
 def _validate_provider(directory: str) -> int:
