@@ -7,8 +7,6 @@ from stdio_box.provider import ProviderError, load_provider
 _USAGE = """usage: stdio-box validate-provider <provider-directory>
        stdio-box launch"""
 
-_CREDSCTL_USAGE = "usage: credsctl <command> [<args>]"
-
 
 def main(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
@@ -29,9 +27,9 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def credsctl_main(argv: list[str] | None = None) -> None:
-    del argv
-    print(_CREDSCTL_USAGE, file=sys.stderr)
-    raise SystemExit(2)
+    from stdio_box.credsctl import credsctl_main as run
+
+    run(argv)
 
 
 def _validate_provider(directory: str) -> int:

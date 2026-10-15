@@ -41,6 +41,7 @@ packages = ["src/stdio_box"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "schemas/provider-v1.json" = "stdio_box/schemas/provider-v1.json"
+"src/stdio_box/store/migrations/0001_init.sql" = "stdio_box/store/migrations/0001_init.sql"
 
 [tool.ruff]
 target-version = "py312"
