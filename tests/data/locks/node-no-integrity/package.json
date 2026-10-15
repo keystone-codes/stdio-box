@@ -1,0 +1,6 @@
+{
+  "name": "echo",
+  "dependencies": {
+    "tiny-bin": "1.0.0"
+  }
+}

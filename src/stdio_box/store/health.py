@@ -32,7 +32,7 @@ def healthz_body(
     schema_newer: bool = False,
     forwarded_host: str | None = None,
     isolation: str = "unknown",
-    install: str = "unknown",
+    install: object = "unknown",
 ) -> tuple[int, dict]:
     """Full `/healthz` payload, including the public-domain redaction.
 

@@ -11,6 +11,7 @@ import threading
 
 _lock = threading.Lock()
 _isolation = "unknown"
+_install: object = "unknown"
 _warned = False
 
 _LOG = logging.getLogger("stdio_box.wrapper")
@@ -19,6 +20,19 @@ _LOG = logging.getLogger("stdio_box.wrapper")
 def get_isolation() -> str:
     with _lock:
         return _isolation
+
+
+def get_install() -> object:
+    """``unknown``, or the ``install_status`` object once launch has installed."""
+    with _lock:
+        return _install
+
+
+def note_install(value: object) -> None:
+    """Remember the install object for ``/healthz`` and ``credsctl status``."""
+    global _install
+    with _lock:
+        _install = value
 
 
 def note_child_isolation(value: str) -> None:

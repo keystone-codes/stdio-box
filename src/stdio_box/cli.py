@@ -1,4 +1,4 @@
-"""Command entry points. Later cards add the remaining subcommands."""
+"""Command entry points."""
 
 import json
 import os
@@ -12,6 +12,7 @@ from stdio_box.config import Config, load_config
 from stdio_box.http_app import UnavailableForwarder, build_app
 from stdio_box.logs import configure_logging
 from stdio_box.provider import Provider, ProviderError, load_provider
+from stdio_box.snapshot import snapshot_main
 from stdio_box.store.errors import StoreSchemaNewer
 from stdio_box.store.repo import Store
 
@@ -19,7 +20,9 @@ _USAGE = """usage: stdio-box validate-provider <provider-directory>
        stdio-box launch
        stdio-box serve
        stdio-box serve (--spawner inline | --spawner-fd N) --installed JSON
-       stdio-box debug-spawn --slot N"""
+       stdio-box debug-spawn --slot N
+       stdio-box install [--provider-dir DIR] [--cache DIR]
+       stdio-box snapshot-tools [--provider-dir DIR] [--out PATH|-] [--check] [--env-file PATH]"""
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -34,6 +37,9 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit(2)
         raise SystemExit(_validate_provider(args[1]))
     if command == "launch":
+        if len(args) != 1:
+            print(_USAGE, file=sys.stderr)
+            raise SystemExit(2)
         from stdio_box.launch import main as launch_main
 
         raise SystemExit(launch_main())
@@ -48,6 +54,12 @@ def main(argv: list[str] | None = None) -> None:
         from stdio_box.serve import debug_spawn_main
 
         raise SystemExit(debug_spawn_main(args[1:]))
+    if command == "install":
+        from stdio_box.launch import run_install
+
+        raise SystemExit(run_install(args[1:]))
+    if command == "snapshot-tools":
+        raise SystemExit(snapshot_main(args[1:]))
     print(_USAGE, file=sys.stderr)
     raise SystemExit(2)
 

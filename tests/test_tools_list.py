@@ -10,6 +10,7 @@ from starlette.testclient import TestClient
 from tests.support.facade import ECHO_DIR, TEST_BEARER, build_echo_app, make_token
 
 from stdio_box.creds_tools import TOOLS
+from stdio_box.runtime import get_install, get_isolation
 
 SNAPSHOT_NAMES = [
     "who",
@@ -64,8 +65,10 @@ def test_call_routes_creds_and_snapshot_tools() -> None:
         assert providers.get("isError") is not True
         provider = body["providers"][0]
         assert provider["name"] == "echo"
-        assert provider["isolation"] == "unknown"
-        assert provider["server"]["installed_key"] == "unknown"
+        assert provider["isolation"] == get_isolation()
+        install = get_install()
+        expected_key = install["key"] if isinstance(install, dict) else "unknown"
+        assert provider["server"]["installed_key"] == expected_key
         assert provider["server"]["command"] == "uvx echo-server==0.0.0"
 
         whoami = _call(client, "creds_whoami", make_token(tool="creds_whoami"))
