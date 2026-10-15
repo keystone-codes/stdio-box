@@ -1,3 +1,4 @@
+#!/opt/stdio-box/.venv/bin/python
 """Stdio MCP server used by the box tests.
 
 Tools stay small and explicit so later cards can drive a child without a network install.

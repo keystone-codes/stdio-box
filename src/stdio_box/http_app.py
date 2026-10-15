@@ -24,6 +24,7 @@ from stdio_box.identity import CallRejected, ReplayCache, verify_call
 from stdio_box.logs import RequestLogMiddleware
 from stdio_box.provider import Provider
 from stdio_box.refusals import INVALID_ARGUMENT, NOT_AVAILABLE, Refusal
+from stdio_box.runtime import get_isolation
 from stdio_box.store.health import healthz_body
 
 _PORT = re.compile(r":\d+\Z")
@@ -61,14 +62,16 @@ class UnavailableForwarder:
 def health_details() -> dict[str, str]:
     """Facade fields for an internal ``/healthz``.
 
-    ``isolation`` and ``install`` stay ``unknown`` until those checks report.
-    ``store`` stays ``unknown`` until this process has opened the store.
-    ``unknown`` is not a failure, so ``status`` is ``ok``.
+    ``isolation`` is the wrapper value from :func:`get_isolation`: ``unknown``
+    until a child starts, then ``per_slot_uid`` or ``shared_uid``. ``install``
+    stays ``unknown`` until provider install reports. ``store`` stays
+    ``unknown`` until this process has opened the store. ``unknown`` is not a
+    failure, so ``status`` is ``ok``.
     """
     return {
         "status": "ok",
         "store": "unknown",
-        "isolation": "unknown",
+        "isolation": get_isolation(),
         "install": "unknown",
     }
 
@@ -269,8 +272,7 @@ def _healthz(
     ``X-Forwarded-Host`` keeps the status code the store would have returned and
     replaces the body with ``{}``. Until the store is opened, the facade body
     stays as it is: ``store`` is ``unknown`` and that is not a failure.
-    ``isolation`` and ``install`` come from the facade and stay ``unknown``
-    until those checks exist.
+    ``isolation`` comes from the wrapper. ``install`` stays ``unknown``.
     """
     forwarded = _forwarded_host(request)
     details = health_details()
