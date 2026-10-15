@@ -9,6 +9,7 @@ import mcp.types as types
 from stdio_box._vendor.keystone_identity import KeystoneIdentity
 from stdio_box.provider import Provider
 from stdio_box.refusals import NOT_AVAILABLE, Refusal
+from stdio_box.runtime import get_install, get_isolation
 
 _Handler = Callable[[Provider, KeystoneIdentity, dict[str, Any]], Awaitable[types.CallToolResult]]
 
@@ -138,6 +139,10 @@ async def _providers(
                 "tools": None if variant.tools is None else list(variant.tools),
             }
         )
+    install = get_install()
+    installed_key = "unknown"
+    if isinstance(install, dict) and isinstance(install.get("key"), str):
+        installed_key = install["key"]
     payload = {
         "providers": [
             {
@@ -145,10 +150,10 @@ async def _providers(
                 "title": provider.title,
                 "server": {
                     "command": provider.server.command,
-                    "installed_key": "unknown",
+                    "installed_key": installed_key,
                 },
                 "variants": variants,
-                "isolation": "unknown",
+                "isolation": get_isolation(),
             }
         ]
     }

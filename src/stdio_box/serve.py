@@ -19,9 +19,11 @@ from dataclasses import dataclass
 import anyio
 
 from stdio_box.child_io import open_child_session
+from stdio_box.install import InstalledServer as InstallRecord
+from stdio_box.install import install_status
 from stdio_box.installed import InstalledServer
 from stdio_box.log import configure_logging
-from stdio_box.runtime import get_isolation, note_child_isolation
+from stdio_box.runtime import get_install, get_isolation, note_child_isolation, note_install
 from stdio_box.spawner import (
     ChildHandle,
     InlineSpawner,
@@ -55,6 +57,18 @@ def main(argv: list[str]) -> int:
     configure_logging()
     args = _parse_args(argv)
     _disable_dumpable()
+    note_install(
+        install_status(
+            InstallRecord(
+                argv0=args.installed.argv0,
+                key=args.installed.key,
+                from_cache=args.installed.from_cache,
+                duration_ms=args.installed.duration_ms,
+                at=args.installed.at,
+                args=args.installed.args,
+            )
+        )
+    )
     allowed = allowlist_for(args.installed.argv0)
     if args.inline:
         spawner: InlineSpawner | SpawnerClient = InlineSpawner(allowed)
@@ -62,7 +76,7 @@ def main(argv: list[str]) -> int:
     else:
         assert args.spawner_fd is not None
         spawner = SpawnerClient(socket.socket(fileno=args.spawner_fd))
-    hub = _DebugHub(spawner, args.installed.argv0)
+    hub = _DebugHub(spawner, [args.installed.argv0, *args.installed.args])
     if os.environ.get("BOX_DEBUG") == "1":
         hub.start()
     # The isolation image has no facade settings. A configured box opens the
@@ -147,9 +161,9 @@ def _wait_until_stopped(spawner: InlineSpawner | SpawnerClient) -> None:
 
 
 class _DebugHub:
-    def __init__(self, spawner: InlineSpawner | SpawnerClient, argv0: str) -> None:
+    def __init__(self, spawner: InlineSpawner | SpawnerClient, argv: list[str]) -> None:
         self._spawner = spawner
-        self._argv0 = argv0
+        self._argv = argv
         self._slots: dict[int, _Running] = {}
         self._thread: threading.Thread | None = None
 
@@ -203,7 +217,12 @@ class _DebugHub:
     async def _dispatch(self, msg: dict[str, object]) -> dict[str, object]:
         op = msg.get("op")
         if op == "status":
-            return {"ok": True, "status": "ok", "isolation": get_isolation()}
+            return {
+                "ok": True,
+                "status": "ok",
+                "isolation": get_isolation(),
+                "install": get_install(),
+            }
         slot = msg.get("slot")
         if type(slot) is not int:
             return {"ok": False, "error": "bad_request"}
@@ -232,7 +251,7 @@ class _DebugHub:
         }
         child_env.update(env)
         handle = await anyio.to_thread.run_sync(
-            lambda: self._spawner.spawn(slot, [self._argv0], child_env, f"/tmp/box/slot-{slot}")
+            lambda: self._spawner.spawn(slot, self._argv, child_env, f"/tmp/box/slot-{slot}")
         )
         note_child_isolation(handle.isolation)
         pump = StderrPump(

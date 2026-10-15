@@ -29,13 +29,18 @@ def test_validate_provider_exit_codes(tmp_path: Path, capsys: pytest.CaptureFixt
     assert "name: must equal directory name 'echo'" in captured.out
 
 
-def test_launch_reports_install_is_not_implemented(
-    capsys: pytest.CaptureFixture[str],
+def test_launch_requires_a_command(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    monkeypatch.delenv("BOX_COMMAND", raising=False)
+    monkeypatch.delenv("BOX_PROVIDER", raising=False)
+    monkeypatch.delenv("BOX_PROVIDER_DIR", raising=False)
+    monkeypatch.delenv("BOX_DEBUG", raising=False)
+    monkeypatch.delenv("BOX_CHILD_ARGV_OVERRIDE", raising=False)
     with pytest.raises(SystemExit) as exc:
         main(["launch"])
     assert exc.value.code == 2
-    assert "provider install is not implemented yet" in capsys.readouterr().err
+    assert "config error: BOX_COMMAND is required" in capsys.readouterr().err
 
 
 def test_credsctl_prints_usage(capsys: pytest.CaptureFixture[str]) -> None:
