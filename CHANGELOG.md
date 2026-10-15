@@ -1,9 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.0] - 2026-10-15
 
 ### Added
 
+- Packages: atlassian 1.0.0, notion 1.0.0, tavily 1.0.0, yandex-tracker 1.0.0, yandex-wiki 1.0.0.
 - Package `tavily` 1.0.0 (tavily-mcp 0.2.22).
 - Package `yandex-tracker` 1.0.0 (@fractalizer/mcp-server-yandex-tracker 5.1.0).
 - Package `yandex-wiki` 1.0.0 (ya-wiki-mcp 0.3.1).

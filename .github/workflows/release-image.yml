@@ -69,19 +69,35 @@ jobs:
         run: |
           set -euo pipefail
           v="${{ github.event.inputs.version }}"
+          digest="${{ steps.build.outputs.digest }}"
+          ref="${IMAGE}:${v}@${digest}"
           branch="release/pin-$v"
           git checkout -b "$branch"
-          uv run python scripts/pin_digest.py "${{ steps.build.outputs.digest }}"
-          git add IMAGE
+          pinned_output=$(uv run --quiet python scripts/pin_digest.py "$ref")
+          pinned=()
+          if [ -n "$pinned_output" ]; then
+            mapfile -t pinned <<< "$pinned_output"
+          fi
+          git add IMAGE packages/*/keystone-service.yaml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore: pin image digest for $v"
           git push -u origin "$branch"
+          pkg_md=""
+          if [ "${#pinned[@]}" -gt 0 ]; then
+            for row in "${pinned[@]}"; do
+              name="${row%% *}"
+              version="${row#* }"
+              pkg_md+="- \`${name}\` ${version}"$'\n'
+            done
+          fi
           gh pr create --title "Pin stdio-box image digest for $v" --body "$(cat <<EOF
-          Release \`$v\` image digest: \`${{ steps.build.outputs.digest }}\`
+          Release \`$v\` image digest: \`${digest}\`
 
-          \`IMAGE\` is \`ghcr.io/keystone-codes/stdio-box:$v@${{ steps.build.outputs.digest }}\`.
+          \`IMAGE\` is \`${ref}\`.
 
+          Packages:
+          ${pkg_md}
           Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EOF
           )"
