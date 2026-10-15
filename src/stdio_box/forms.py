@@ -188,7 +188,13 @@ class _Creds:
             allow_private_urls=self._config.allow_private_urls,
             allowed_url_hosts=self._config.allowed_url_hosts,
         )
-        result = await run_checks(self._provider, variant, values, instances=None, config=policy)
+        result = await run_checks(
+            self._provider,
+            variant,
+            values,
+            instances=self._form_stats,
+            config=policy,
+        )
         if result.ok is False:
             return await self._reject(token, link, profile, variant, nonce, result)
         return await self._save(token, link, profile, variant, secrets, result)
