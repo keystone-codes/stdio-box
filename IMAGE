@@ -1,3 +1,1 @@
-# Filled by .github/workflows/release-image.yml after the image is pushed.
-# The line it writes matches:
-# ghcr.io/keystone-codes/stdio-box:<version>@sha256:<64 hex chars>
+ghcr.io/keystone-codes/stdio-box:0.1.0@sha256:4d6081cb1608c922c6c7299d30570a145187e65e4be274f9bb98aaaa7d67c519
