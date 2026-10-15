@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "server": {"command": "uvx echo-server==0.0.0"},
+  "taken_at": "2026-10-15T00:00:00Z",
+  "tools": [
+    {
+      "name": "who",
+      "description": "Report pid, uid, a token hash, the url, and environment names.",
+      "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}}
+    },
+    {
+      "name": "slow",
+      "description": "Sleep without blocking the event loop.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"seconds": {"type": "number", "minimum": 0}},
+        "required": ["seconds"]
+      }
+    },
+    {
+      "name": "block",
+      "description": "Sleep on the process, blocking the event loop.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"seconds": {"type": "number", "minimum": 0}},
+        "required": ["seconds"]
+      }
+    },
+    {
+      "name": "crash",
+      "description": "Exit the process with status 3.",
+      "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}}
+    },
+    {
+      "name": "spam",
+      "description": "Write lines to stderr. The first line is ECHO_TOKEN.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"lines": {"type": "integer", "minimum": 0}},
+        "required": ["lines"]
+      }
+    },
+    {
+      "name": "meta",
+      "description": "Return the _meta object received with this call.",
+      "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}}
+    },
+    {
+      "name": "escape",
+      "description": "Fork a session leader that holds files open under /tmp and /dev/shm.",
+      "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}}
+    },
+    {
+      "name": "forkbomb",
+      "description": "Fork n sleeping children.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {"n": {"type": "integer", "minimum": 0}},
+        "required": ["n"]
+      }
+    },
+    {
+      "name": "extra_tool",
+      "description": "Present only on the echo provider's full variant.",
+      "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}}
+    }
+  ]
+}
