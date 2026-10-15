@@ -30,6 +30,9 @@ jobs:
       - name: Pytest
         run: uv run pytest -q -m "not integration"
 
+      - name: Isolation
+        run: uv run pytest -q tests/integration/test_isolation.py
+
       - name: Docker build
         run: docker build .
 

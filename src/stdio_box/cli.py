@@ -17,7 +17,9 @@ from stdio_box.store.repo import Store
 
 _USAGE = """usage: stdio-box validate-provider <provider-directory>
        stdio-box launch
-       stdio-box serve"""
+       stdio-box serve
+       stdio-box serve (--spawner inline | --spawner-fd N) --installed JSON
+       stdio-box debug-spawn --slot N"""
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -32,25 +34,37 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit(2)
         raise SystemExit(_validate_provider(args[1]))
     if command == "launch":
-        print("launch is not implemented yet", file=sys.stderr)
-        raise SystemExit(2)
+        from stdio_box.launch import main as launch_main
+
+        raise SystemExit(launch_main())
     if command == "serve":
-        _serve(args[1:])
+        if args[1:]:
+            from stdio_box.serve import main as serve_main
+
+            raise SystemExit(serve_main(args[1:]))
+        serve_http()
         return
+    if command == "debug-spawn":
+        from stdio_box.serve import debug_spawn_main
+
+        raise SystemExit(debug_spawn_main(args[1:]))
     print(_USAGE, file=sys.stderr)
     raise SystemExit(2)
 
 
 def credsctl_main(argv: list[str] | None = None) -> None:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args == ["status"] and os.environ.get("BOX_DEBUG") == "1":
+        from stdio_box.serve import credsctl_status
+
+        raise SystemExit(credsctl_status())
     from stdio_box.credsctl import credsctl_main as run
 
     run(argv)
 
 
-def _serve(args: list[str]) -> None:
-    if args:
-        print(_USAGE, file=sys.stderr)
-        raise SystemExit(2)
+def serve_http() -> None:
+    """Load config, open the store, and serve ``/mcp`` and ``/healthz``."""
     config = load_config(os.environ)
     configure_logging(config.log_level)
     try:

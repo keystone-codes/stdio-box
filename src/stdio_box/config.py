@@ -26,6 +26,8 @@ class Config:
     data_dir: str
     log_level: str
     allowed_hosts: tuple[str, ...]
+    debug: bool = False
+    child_argv_override: str | None = None
 
 
 def load_config(environ: Mapping[str, str]) -> Config:
@@ -76,6 +78,7 @@ def _parse(environ: Mapping[str, str]) -> tuple[Config | None, list[str]]:
     data_dir = environ.get("BOX_DATA_DIR", "").strip() or "/data"
     log_level = _log_level(environ, errors)
     allowed_hosts = _allowed_hosts(environ.get("BOX_ALLOWED_HOSTS", ""))
+    debug, child_argv_override = read_spawner_settings(environ)
 
     if errors:
         return None, errors
@@ -93,9 +96,17 @@ def _parse(environ: Mapping[str, str]) -> tuple[Config | None, list[str]]:
             data_dir=data_dir,
             log_level=log_level,
             allowed_hosts=allowed_hosts,
+            debug=debug,
+            child_argv_override=child_argv_override,
         ),
         [],
     )
+
+
+def read_spawner_settings(environ: Mapping[str, str]) -> tuple[bool, str | None]:
+    """``BOX_DEBUG`` and ``BOX_CHILD_ARGV_OVERRIDE``. Neither is required."""
+    override = environ.get("BOX_CHILD_ARGV_OVERRIDE")
+    return environ.get("BOX_DEBUG") == "1", override or None
 
 
 def _secret_ok(value: str) -> bool:

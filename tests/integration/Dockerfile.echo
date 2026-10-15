@@ -1,0 +1,7 @@
+# Local stdio-box image plus the echo provider, for isolation checks.
+FROM stdio-box:s04
+COPY tests/data/packages/echo/ /opt/box/packages/echo/
+COPY tests/support/echo_server.py /opt/box/echo_server.py
+RUN chmod 755 /opt/box/echo_server.py
+ENV BOX_DEBUG=1 \
+    BOX_CHILD_ARGV_OVERRIDE=/opt/box/echo_server.py
