@@ -1,0 +1,105 @@
+schema_version: 1
+kind: service
+name: notion
+version: 1.0.0
+publisher: keystone-codes
+summary: "Notion tools (@notionhq/notion-mcp-server 2.5.2) behind Keystone; each person, service or role uses its own Notion integration."
+homepage: https://github.com/keystone-codes/stdio-box/tree/notion/v1.0.0/packages/notion
+compat:
+  keystone_mcp: ">=0.5.0,<2.0"
+  contracts: [upstream-registry/1, identity-assertion/1]
+mcp:
+  container: mcp
+  transport: http
+  path: /mcp
+  healthz: /healthz
+  namespace: notion
+  bearer_env: BOX_BEARER_TOKEN
+  tools:
+    - get_user
+    - get_users
+    - get_self
+    - post_search
+    - get_block_children
+    - patch_block_children
+    - retrieve_a_block
+    - update_a_block
+    - delete_a_block
+    - retrieve_a_page
+    - patch_page
+    - post_page
+    - retrieve_a_page_property
+    - retrieve_a_comment
+    - create_a_comment
+    - query_data_source
+    - retrieve_a_data_source
+    - update_a_data_source
+    - create_a_data_source
+    - list_data_source_templates
+    - retrieve_a_database
+    - move_page
+    - retrieve_page_markdown
+    - update_page_markdown
+    - creds_providers
+    - creds_profiles
+    - creds_bindings
+    - creds_profile_create
+    - creds_profile_rotate
+    - creds_profile_delete
+    - creds_bind
+    - creds_unbind
+    - creds_whoami
+    - creds_check
+  critical:
+    - post_search
+    - patch_block_children
+    - update_a_block
+    - delete_a_block
+    - patch_page
+    - post_page
+    - create_a_comment
+    - query_data_source
+    - update_a_data_source
+    - create_a_data_source
+    - move_page
+    - update_page_markdown
+    - creds_profile_create
+    - creds_profile_rotate
+    - creds_profile_delete
+    - creds_bind
+    - creds_unbind
+identity:
+  signed_assertion: required
+  secret_env: BOX_IDENTITY_SECRET
+  audience_env: BOX_IDENTITY_AUDIENCE
+containers:
+  mcp:
+    # placeholder until the stdio-box image release records the digest
+    image: "ghcr.io/keystone-codes/stdio-box:0.1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    port: 8081
+    env:
+      - name: BOX_PROVIDER
+        default: "notion"
+        description: "Provider directory inside the stdio-box image."
+      - name: BOX_COMMAND
+        default: "npx -y @notionhq/notion-mcp-server@2.5.2"
+        description: "Server to run. The package and version must match the provider lock file."
+    secrets:
+      - name: BOX_STORE_KEY
+        generate:
+          bytes: 32
+    volumes:
+      - name: store
+        path: /data
+      - name: cache
+        path: /cache
+    healthcheck:
+      path: /healthz
+      interval: 10s
+      start_period: 300s
+needs: []
+requires: []
+public_paths:
+  - /creds/
+public_base_url_env: BOX_PUBLIC_BASE_URL
+recommended_policy: policy.example.yaml
