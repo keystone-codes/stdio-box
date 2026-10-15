@@ -24,6 +24,7 @@ from stdio_box.identity import CallRejected, ReplayCache, verify_call
 from stdio_box.logs import RequestLogMiddleware
 from stdio_box.provider import Provider
 from stdio_box.refusals import INVALID_ARGUMENT, NOT_AVAILABLE, Refusal
+from stdio_box.store.health import healthz_body
 
 _PORT = re.compile(r":\d+\Z")
 
@@ -58,10 +59,11 @@ class UnavailableForwarder:
 
 
 def health_details() -> dict[str, str]:
-    """Fields shown when the request did not come through the public proxy.
+    """Facade fields for an internal ``/healthz``.
 
-    ``store``, ``isolation``, and ``install`` stay ``unknown`` until those
-    checks report. ``unknown`` is not a failure, so ``status`` is ``ok``.
+    ``isolation`` and ``install`` stay ``unknown`` until those checks report.
+    ``store`` stays ``unknown`` until this process has opened the store.
+    ``unknown`` is not a failure, so ``status`` is ``ok``.
     """
     return {
         "status": "ok",
@@ -76,6 +78,9 @@ def build_app(
     provider: Provider,
     catalog: Catalog,
     forwarder: Forwarder,
+    store: object | None = None,
+    *,
+    schema_newer: bool = False,
 ) -> Starlette:
     """Starlette app for ``/mcp`` and ``/healthz``. ``/creds/`` is not mounted."""
     replay_cache = ReplayCache()
@@ -98,7 +103,11 @@ def build_app(
                 endpoint=_McpGate(_McpEndpoint(), config),
                 methods=["GET", "POST", "DELETE"],
             ),
-            Route("/healthz", endpoint=_healthz, methods=["GET"]),
+            Route(
+                "/healthz",
+                endpoint=_healthz_route(store, schema_newer=schema_newer),
+                methods=["GET"],
+            ),
         ],
         lifespan=lifespan,
     )
@@ -242,9 +251,45 @@ def _header(scope: Scope, name: bytes) -> str | None:
     return None
 
 
-async def _healthz(request: Request) -> JSONResponse:
-    # The public proxy sets X-Forwarded-Host. That path learns nothing about
-    # the store, isolation, or install state: status code and an empty object.
-    if "x-forwarded-host" in request.headers:
-        return JSONResponse({})
-    return JSONResponse(health_details())
+def _healthz_route(store: object | None, *, schema_newer: bool):
+    async def healthz(request: Request) -> JSONResponse:
+        return _healthz(request, store, schema_newer=schema_newer)
+
+    return healthz
+
+
+def _healthz(
+    request: Request,
+    store: object | None = None,
+    *,
+    schema_newer: bool = False,
+) -> JSONResponse:
+    """Internal callers see status and store. The public proxy sees the code and ``{}``.
+
+    ``X-Forwarded-Host`` keeps the status code the store would have returned and
+    replaces the body with ``{}``. Until the store is opened, the facade body
+    stays as it is: ``store`` is ``unknown`` and that is not a failure.
+    ``isolation`` and ``install`` come from the facade and stay ``unknown``
+    until those checks exist.
+    """
+    forwarded = _forwarded_host(request)
+    details = health_details()
+    if store is None and not schema_newer:
+        if forwarded is not None:
+            return JSONResponse({})
+        return JSONResponse(details)
+    status_code, body = healthz_body(
+        store,
+        schema_newer=schema_newer,
+        forwarded_host=forwarded,
+        isolation=details["isolation"],
+        install=details["install"],
+    )
+    return JSONResponse(body, status_code=status_code)
+
+
+def _forwarded_host(request: Request) -> str | None:
+    """The public proxy sets ``X-Forwarded-Host``. An empty value still counts."""
+    if "x-forwarded-host" not in request.headers:
+        return None
+    return request.headers["x-forwarded-host"] or "-"
