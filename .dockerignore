@@ -2,7 +2,13 @@
 .github
 .venv
 venv
-tests
+tests/**
+!tests/data/
+!tests/data/packages/
+!tests/data/packages/echo/
+!tests/data/packages/echo/**
+!tests/support/
+!tests/support/echo_server.py
 **/__pycache__
 **/*.pyc
 .pytest_cache
