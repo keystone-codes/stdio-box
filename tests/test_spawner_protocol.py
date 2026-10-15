@@ -2,10 +2,12 @@
 
 import json
 import os
+import stat
 import threading
+from pathlib import Path
 
 from stdio_box.protocol import MAX_MESSAGE, control_socketpair, recv_message, send_message
-from stdio_box.spawner import SpawnerServer
+from stdio_box.spawner import SpawnerServer, _reset_slot_directory
 
 _ALLOWED = frozenset({"/bin/echo"})
 
@@ -59,6 +61,15 @@ def test_rejects_bad_requests_and_stays_alive() -> None:
         client.close()
         thread.join(timeout=5)
     assert not thread.is_alive()
+
+
+def test_reset_slot_directory_includes_tmp(tmp_path: Path) -> None:
+    slot = tmp_path / "0"
+    _reset_slot_directory(str(slot), os.getuid(), os.getgid())
+    tmp = slot / "tmp"
+    assert tmp.is_dir()
+    assert stat.S_IMODE(tmp.stat().st_mode) == 0o700
+    assert stat.S_IMODE(slot.stat().st_mode) == 0o700
 
 
 def _roundtrip(sock, message: dict | bytes) -> dict:

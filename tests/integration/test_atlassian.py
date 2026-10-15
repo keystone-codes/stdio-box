@@ -65,7 +65,12 @@ async def test_profiles_keep_accounts_apart() -> None:
             {
                 "name": "cloud",
                 "variant": "cloud",
-                "fields": {"JIRA_URL": MOCK_URL, "CONFLUENCE_URL": MOCK_URL},
+                "fields": {
+                    "JIRA_URL": MOCK_URL,
+                    "JIRA_USERNAME": "dev@example.test",
+                    "CONFLUENCE_URL": MOCK_URL,
+                    "CONFLUENCE_USERNAME": "dev@example.test",
+                },
             },
             sub="dev@example.test",
         )

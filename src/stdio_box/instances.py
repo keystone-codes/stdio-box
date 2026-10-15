@@ -433,8 +433,7 @@ class InstanceManager:
             inst.handle = handle
             inst.pid = handle.pid
             note_child_isolation(handle.isolation)
-            tmp = os.path.join(home, "tmp")
-            await anyio.to_thread.run_sync(lambda: os.makedirs(tmp, mode=0o700, exist_ok=True))
+            await anyio.to_thread.run_sync(_make_slot_tmp, home)
             inst.pump = StderrPump(handle.take_stderr(), profile.id, generation, masks, slot)
             inst.pump.start()
             if self._tg is None:
@@ -484,8 +483,7 @@ class InstanceManager:
             secrets=secrets,
         )
         home = slot_cwd(slot, self._slot_root)
-        tmp = os.path.join(home, "tmp")
-        await anyio.to_thread.run_sync(lambda: os.makedirs(tmp, mode=0o700, exist_ok=True))
+        await anyio.to_thread.run_sync(_make_slot_tmp, home)
         handle = await anyio.to_thread.run_sync(lambda: self._spawner.spawn(slot, argv, env, home))
         inst.handle = handle
         inst.pid = handle.pid
@@ -916,6 +914,14 @@ class InstanceManager:
         except PermissionError:
             return False
         return False
+
+
+def _make_slot_tmp(home: str) -> None:
+    """Create the slot temp directory when this process owns the slot."""
+    try:
+        os.makedirs(os.path.join(home, "tmp"), mode=0o700, exist_ok=True)
+    except PermissionError:
+        return
 
 
 def _iso_now() -> str:
