@@ -92,6 +92,27 @@ def test_pending_public_domain_and_defaults(tmp_path: Path) -> None:
     assert hosts.log_level == "INFO"
 
 
+def test_instance_limit_defaults_and_rejection(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _touch(tmp_path)
+    config = load_config(_environ(tmp_path))
+    assert config.max_instances == 8
+    assert config.idle_seconds == 600
+    assert config.start_timeout_seconds == 60
+    assert config.call_timeout_seconds == 120
+    assert config.audit_retention_days == 30
+
+    narrowed = load_config(_environ(tmp_path, BOX_MAX_INSTANCES="1", BOX_IDLE_SECONDS="1"))
+    assert narrowed.max_instances == 1
+    assert narrowed.idle_seconds == 1
+
+    with pytest.raises(SystemExit) as exc:
+        load_config(_environ(tmp_path, BOX_MAX_INSTANCES="33"))
+    assert exc.value.code == 2
+    assert "config error: BOX_MAX_INSTANCES is required" in capsys.readouterr().err
+
+
 def test_missing_provider_directory(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     environ = _environ(tmp_path)
     del environ["BOX_PROVIDER_DIR"]
