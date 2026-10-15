@@ -238,6 +238,14 @@ class InstanceManager:
         self._refusals[code] = self._refusals.get(code, 0) + 1
         self.note_call("refused")
 
+    def note_form_issued(self) -> None:
+        """Count one form page. The status writer publishes ``forms_issued_total``."""
+        self.forms_issued_total += 1
+
+    def note_form_submitted(self, outcome: str) -> None:
+        """Count one submission. The status writer publishes ``forms_submitted_total``."""
+        self.forms_submitted_total[outcome] = self.forms_submitted_total.get(outcome, 0) + 1
+
     def snapshot(self) -> dict[str, object]:
         by_state = {"starting": 0, "running": 0, "stopping": 0, "backoff": 0, "failed": 0}
         running = 0
@@ -708,7 +716,7 @@ class InstanceManager:
 
     async def _apply_revision(self) -> None:
         for inst in list(self._current.values()):
-            if inst.state not in {"running", "starting", "backoff"}:
+            if inst.state not in {"running", "starting", "backoff", "failed"}:
                 continue
             profile_id = inst.profile_id
             profile = await anyio.to_thread.run_sync(

@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from stdio_box.url_policy import url_policy_from_mapping
+
 _MIN_SECRET_BYTES = 32
 _PROVIDER_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,30}$")
 _LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
@@ -59,6 +61,10 @@ class Config:
     start_timeout_seconds: int = 60
     call_timeout_seconds: int = 120
     audit_retention_days: int = 30
+    allow_http_urls: bool = False
+    allow_private_urls: bool = False
+    allowed_url_hosts: tuple[str, ...] = ()
+    form_ttl_seconds: int = 900
 
 
 @dataclass(frozen=True)
@@ -167,6 +173,8 @@ def _parse(environ: Mapping[str, str]) -> tuple[Config | None, list[str]]:
     audit_retention_days = _ranged_int(
         environ, "BOX_AUDIT_RETENTION_DAYS", _AUDIT_RETENTION_DEFAULT, 1, 3650, errors
     )
+    url_policy = url_policy_from_mapping(environ)
+    form_ttl = _form_ttl(environ.get("BOX_FORM_TTL_SECONDS", ""), errors)
 
     if errors:
         return None, errors
@@ -191,6 +199,10 @@ def _parse(environ: Mapping[str, str]) -> tuple[Config | None, list[str]]:
             start_timeout_seconds=start_timeout_seconds,
             call_timeout_seconds=call_timeout_seconds,
             audit_retention_days=audit_retention_days,
+            allow_http_urls=url_policy.allow_http_urls,
+            allow_private_urls=url_policy.allow_private_urls,
+            allowed_url_hosts=url_policy.allowed_url_hosts,
+            form_ttl_seconds=form_ttl,
         ),
         [],
     )
@@ -286,6 +298,21 @@ def _positive_seconds(
 
 def _allowed_hosts(raw: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+def _form_ttl(raw: str, errors: list[str]) -> int:
+    text = raw.strip()
+    if not text:
+        return 900
+    try:
+        value = int(text)
+    except ValueError:
+        errors.append("BOX_FORM_TTL_SECONDS")
+        return 900
+    if value < 60 or value > 3600:
+        errors.append("BOX_FORM_TTL_SECONDS")
+        return 900
+    return value
 
 
 def _timeout(raw: str, errors: list[str]) -> int:

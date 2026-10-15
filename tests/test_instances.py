@@ -207,3 +207,19 @@ async def test_call_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
         assert time.monotonic() - started < 4
         assert body(result)["code"] == UPSTREAM_TIMEOUT
     store.close()
+
+
+def test_form_counters_stay_on_the_status_writer(tmp_path: Path) -> None:
+    store = open_store(tmp_path)
+    _provider, _catalog, manager, _forwarder = make_runtime(tmp_path, store)
+    before = store.revision()
+    manager.note_form_issued()
+    manager.note_form_submitted("saved")
+    manager.note_form_submitted("rejected")
+    snapshot = manager.snapshot()
+    assert snapshot["forms_issued_total"] == 1
+    assert snapshot["forms_submitted_total"] == {"saved": 1, "rejected": 1}
+    store.write_status(snapshot)
+    assert store.revision() == before
+    assert store.read_status()["forms_issued_total"] == 1
+    store.close()

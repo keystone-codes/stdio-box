@@ -25,6 +25,7 @@ from pathlib import Path
 from stdio_box.store import audit
 from stdio_box.store.crypto import (
     INFO_AUDIT_SUB,
+    INFO_FORM_CSRF,
     INFO_PROFILE_SECRETS,
     derive,
     key_check,
@@ -509,6 +510,12 @@ class Store:
                 (_token_hash(token), profile_id, purpose, pending, expires, by, now),
             )
             return token
+
+    def form_csrf(self, token: str, nonce: str) -> str:
+        """Hex HMAC-SHA256 of the form subkey over the token hash and the nonce."""
+        subkey = derive(self._store_key, self._salt, INFO_FORM_CSRF)
+        material = (_token_hash(token) + nonce).encode("utf-8")
+        return hmac.new(subkey, material, hashlib.sha256).hexdigest()
 
     def peek_link(self, token: str) -> FormLink | None:
         """Return a live link. A preview does not extinguish it."""
