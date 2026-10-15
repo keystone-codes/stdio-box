@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from stdio_box.catalog import build_catalog
+from stdio_box.catalog import _published_name, build_catalog
 from stdio_box.creds_tools import TOOLS
-from stdio_box.provider import load_provider
+from stdio_box.provider import Provider, load_provider
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGES = ROOT / "packages"
@@ -56,7 +56,7 @@ def test_provider_package(package: Path) -> None:
     published = [tool.name for tool in build_catalog(snapshot, provider).published_tools()]
     creds = [tool.name for tool in TOOLS]
     assert manifest["mcp"]["tools"] == published + creds
-    assert manifest["mcp"]["critical"] == _critical(snapshot) + list(CHANGING_CREDS)
+    assert manifest["mcp"]["critical"] == _critical(snapshot, provider) + list(CHANGING_CREDS)
     for name in manifest["mcp"]["tools"]:
         assert len(f"{namespace}_{name}") <= 64
 
@@ -64,18 +64,26 @@ def test_provider_package(package: Path) -> None:
     _assert_lint(package)
 
 
-def _critical(snapshot: dict) -> list[str]:
+def _critical(snapshot: dict, provider: Provider) -> list[str]:
     hinted: list[str] = []
     saw_hint = False
     for tool in snapshot["tools"]:
+        child = tool["name"]
+        published = _published_name(child, provider.tools)
         annotations = tool.get("annotations") if isinstance(tool.get("annotations"), dict) else {}
         if "destructiveHint" in annotations:
             saw_hint = True
-        if annotations.get("destructiveHint") is True:
-            hinted.append(tool["name"])
+        if annotations.get("destructiveHint") is True and published is not None:
+            hinted.append(published)
     if saw_hint:
         return hinted
-    return [tool["name"] for tool in snapshot["tools"] if "delete" in tool["name"]]
+    return [
+        published
+        for tool in snapshot["tools"]
+        if "delete" in tool["name"]
+        for published in [_published_name(tool["name"], provider.tools)]
+        if published is not None
+    ]
 
 
 def _assert_policy(package: Path, namespace: str) -> None:
