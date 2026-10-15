@@ -4,6 +4,53 @@ stdio-box is one container image that runs a third-party MCP stdio server behind
 
 Callers reach the box only through Keystone. The door checks the person or service account, and the box checks the door's bearer token and signed identity before it forwards a tool call.
 
+## How Keystone calls the box
+
+Only the door calls the box. A person reaches it through an agent signed in at the door. A service reaches it as a client of the door, with that service's own service account: the assertion then has `sub` of the form `svc:<name>` and `sub_type` of `service`. The box does not read `X-Author-Email`.
+
+`stdio-box serve` listens on `0.0.0.0` and `BOX_PORT`. A missing or unacceptable setting exits 2, one line per problem: `config error: <NAME> is required`.
+
+| Variable | Default | Accepted value |
+|---|---|---|
+| `BOX_BEARER_TOKEN` | | at least 32 bytes |
+| `BOX_IDENTITY_SECRET` | | at least 32 bytes |
+| `BOX_IDENTITY_AUDIENCE` | | non-empty; the registry entry name |
+| `BOX_PUBLIC_BASE_URL` | | an `https://` URL, including `https://public-domain-pending.invalid` |
+| `BOX_STORE_KEY` | | at least 32 bytes |
+| `BOX_PROVIDER` | | `^[a-z][a-z0-9_-]{0,30}$` |
+| `BOX_PROVIDER_DIR` | `/opt/box/packages/<BOX_PROVIDER>` | directory containing `provider.yaml` and `tools.snapshot.json` |
+| `BOX_COMMAND` | | non-empty |
+| `BOX_PORT` | `8081` | integer from 1 to 65535 |
+| `BOX_DATA_DIR` | `/data` | |
+| `BOX_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` |
+| `BOX_ALLOWED_HOSTS` | empty | comma-separated host names |
+
+Checks on `/mcp`, in order:
+
+1. `Host`, with or without a port, must be `BOX_IDENTITY_AUDIENCE`, that name plus `-mcp`, `localhost`, `127.0.0.1`, or a name from `BOX_ALLOWED_HOSTS`. Otherwise HTTP 421 and `{"error":"misdirected_request"}`.
+2. `Authorization: Bearer` must match `BOX_BEARER_TOKEN`. The comparison does not stop early on length. Otherwise HTTP 401 and `WWW-Authenticate: Bearer`. The MCP parser does not run.
+3. `tools/list` carries no identity. The box returns the published tools from `tools.snapshot.json`, then the ten `creds_*` tools. It does not start the provider server.
+4. `tools/call` requires `X-Keystone-Identity`: HS256, header `typ` of `keystone-identity+jwt`, audience `BOX_IDENTITY_AUDIENCE`. `mcp_target` must be the tool name on this call. Each `jti` is accepted once, and remembered until its `exp` plus 30 seconds. The memory holds at most 100000 entries; when it is full the call is rejected and nothing already stored is dropped.
+
+A failed tool call is `isError: true` with one text block of JSON: `code`, `message`, and `hint`. `code` is one of `identity_rejected`, `no_credentials_profile`, `tool_not_in_profile`, `profile_needs_reentry`, `instance_unavailable`, `instance_failed`, `instances_exhausted`, `instance_busy`, `upstream_timeout`, `not_available`, `invalid_argument`, `unknown_provider`, `profile_exists`, `profile_not_found`, `profile_in_use`, `binding_exists`, `binding_not_found`, `secret_field_in_chat`, `secret_reentry_required`, `missing_fields`, `form_unavailable`, `check_failed`. There is no `credentials_ambiguous` code: when several bindings match, the first in order is the one that applies.
+
+`tools.snapshot.json` is the provider server's `tools/list`, stored as-is:
+
+```json
+{
+  "schema_version": 1,
+  "server": {"command": "uvx echo-server==0.0.0"},
+  "taken_at": "2026-10-15T00:00:00Z",
+  "tools": []
+}
+```
+
+The snapshot's `server.command` must equal the provider's `server.command`. Published names come from the child names by `tools.strip_prefix`, then `tools.normalize: snake` (`re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").lower()`), then `tools.rename`, then `tools.hide`. A published name matches `^[a-z][a-z0-9_]{0,63}$` and does not start with `creds_`. Two child tools that publish as one name are an error at startup.
+
+`GET /healthz` does not check the bearer token. A request that carries `X-Forwarded-Host` (the door's proxy, from the public domain) gets the status code and `{}`. Any other request gets `status`, `store`, `isolation`, and `install`.
+
+Calls of the provider's tools answer `not_available` until a child can run them. The `creds_*` tools answer `not_available` as well, except `creds_providers`, which describes the loaded provider. Its `isolation` and `server.installed_key` are `"unknown"` until those checks report.
+
 ## One image, many providers
 
 The image is built from this repository and published as `ghcr.io/keystone-codes/stdio-box`. It contains the wrapper and the **data** for every provider: `provider.yaml`, the lock file, and `tools.snapshot.json` land at `/opt/box/packages/<name>/`. Manifests, example policies, and provider READMEs stay out of the image, because the manifest pins the image digest.
@@ -26,7 +73,7 @@ PID 1  tini                                 (root; reaps orphaned children)
          child  uid 20000+slot              (one profile's server; HOME=/tmp/box/slot-N)
 ```
 
-`stdio-box launch` is the process the image starts. The install step, the spawner, and the HTTP wrapper are filled in by later changes; this revision of `launch` reports that it is not implemented yet.
+`stdio-box launch` is the process the image starts. The install step and the spawner are not implemented yet; this revision of `launch` reports that. `stdio-box serve` is the HTTP wrapper.
 
 | Path | Owner | Mode | Use |
 |---|---|---|---|
