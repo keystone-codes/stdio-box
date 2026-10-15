@@ -20,6 +20,7 @@ from stdio_box._vendor.keystone_identity import KeystoneIdentity
 from stdio_box.catalog import Catalog
 from stdio_box.config import Config
 from stdio_box.creds_tools import TOOLS, handler_for
+from stdio_box.forms import creds_route
 from stdio_box.identity import CallRejected, ReplayCache, verify_call
 from stdio_box.logs import RequestLogMiddleware
 from stdio_box.provider import Provider
@@ -86,7 +87,7 @@ def build_app(
     *,
     schema_newer: bool = False,
 ) -> Starlette:
-    """Starlette app for ``/mcp`` and ``/healthz``. ``/creds/`` is not mounted."""
+    """Starlette app for ``/mcp``, ``/healthz``, and ``/creds/{token}`` without a bearer."""
     replay_cache = ReplayCache()
     server = _build_server(config, provider, catalog, forwarder, replay_cache)
     manager = StreamableHTTPSessionManager(app=server, stateless=True, json_response=True)
@@ -112,6 +113,7 @@ def build_app(
                 endpoint=_healthz_route(store, schema_newer=schema_newer),
                 methods=["GET"],
             ),
+            creds_route(config, provider, store),
         ],
         lifespan=lifespan,
     )

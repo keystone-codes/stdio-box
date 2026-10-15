@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from stdio_box.url_policy import url_policy_from_mapping
+
 _MIN_SECRET_BYTES = 32
 _PROVIDER_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,30}$")
 _LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
@@ -47,6 +49,10 @@ class Config:
     allowed_hosts: tuple[str, ...]
     debug: bool = False
     child_argv_override: str | None = None
+    allow_http_urls: bool = False
+    allow_private_urls: bool = False
+    allowed_url_hosts: tuple[str, ...] = ()
+    form_ttl_seconds: int = 900
 
 
 @dataclass(frozen=True)
@@ -137,6 +143,8 @@ def _parse(environ: Mapping[str, str]) -> tuple[Config | None, list[str]]:
     log_level = _log_level(environ, errors)
     allowed_hosts = _allowed_hosts(environ.get("BOX_ALLOWED_HOSTS", ""))
     debug, child_argv_override = read_spawner_settings(environ)
+    url_policy = url_policy_from_mapping(environ)
+    form_ttl = _form_ttl(environ.get("BOX_FORM_TTL_SECONDS", ""), errors)
 
     if errors:
         return None, errors
@@ -156,6 +164,10 @@ def _parse(environ: Mapping[str, str]) -> tuple[Config | None, list[str]]:
             allowed_hosts=allowed_hosts,
             debug=debug,
             child_argv_override=child_argv_override,
+            allow_http_urls=url_policy.allow_http_urls,
+            allow_private_urls=url_policy.allow_private_urls,
+            allowed_url_hosts=url_policy.allowed_url_hosts,
+            form_ttl_seconds=form_ttl,
         ),
         [],
     )
@@ -223,6 +235,21 @@ def _log_level(environ: Mapping[str, str], errors: list[str]) -> str:
 
 def _allowed_hosts(raw: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in raw.split(",") if part.strip())
+
+
+def _form_ttl(raw: str, errors: list[str]) -> int:
+    text = raw.strip()
+    if not text:
+        return 900
+    try:
+        value = int(text)
+    except ValueError:
+        errors.append("BOX_FORM_TTL_SECONDS")
+        return 900
+    if value < 60 or value > 3600:
+        errors.append("BOX_FORM_TTL_SECONDS")
+        return 900
+    return value
 
 
 def _timeout(raw: str, errors: list[str]) -> int:
