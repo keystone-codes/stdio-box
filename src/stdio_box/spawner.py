@@ -809,8 +809,12 @@ def _reset_slot_directory(path: str, uid: int, gid: int) -> None:
     if os.path.lexists(path):
         _remove_tree(path)
     os.mkdir(path, 0o700)
+    tmp = os.path.join(path, "tmp")
+    os.mkdir(tmp, 0o700)
     os.chown(path, uid, gid)
     os.chmod(path, 0o700)
+    os.chown(tmp, uid, gid)
+    os.chmod(tmp, 0o700)
 
 
 def _env_ok(env: object) -> bool:
