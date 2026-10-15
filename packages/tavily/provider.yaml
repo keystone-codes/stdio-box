@@ -1,0 +1,24 @@
+schema_version: 1
+name: tavily
+title: Tavily
+server:
+  command: "npx -y tavily-mcp@0.2.22"
+  bin: tavily-mcp
+  lock: package-lock.json
+fields:
+  - {name: TAVILY_API_KEY, type: string, secret: true, hint: "API key from app.tavily.com (Account, API keys)"}
+variants:
+  - name: api_key
+    fields: [TAVILY_API_KEY]
+    checks:
+      - http:
+          method: GET
+          url: "https://api.tavily.com/usage"
+          auth: {bearer: TAVILY_API_KEY}
+          expect_status: [200]
+tools:
+  normalize: none
+discovery:
+  mode: placeholder
+  env: {TAVILY_API_KEY: discovery-placeholder}
+identity_to_child: none
