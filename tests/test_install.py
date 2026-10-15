@@ -88,10 +88,12 @@ def test_node_install_uses_the_lock_and_drops_the_npm_cache(tmp_path: Path) -> N
     provider_dir = _node_provider(tmp_path / "prov", fixture)
     cache = tmp_path / "cache"
     installed = _install(provider_dir, cache, command="npx -y tiny-bin@1.0.0")
-    binary = Path(installed.argv0)
-    assert binary.is_file()
-    assert not (binary.parents[2] / ".npm").exists()
-    ran = subprocess.run([str(binary)], check=False, capture_output=True, text=True)
+    script = Path(installed.args[0])
+    assert script.is_file()
+    assert not (cache / "echo" / installed.key / ".npm").exists()
+    ran = subprocess.run(
+        [installed.argv0, *installed.args], check=False, capture_output=True, text=True
+    )
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout == "ok\n"
     _assert_not_writable(cache / "echo" / installed.key)

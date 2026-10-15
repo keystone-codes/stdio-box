@@ -9,6 +9,7 @@ tests/**
 !tests/data/packages/echo/**
 !tests/support/
 !tests/support/echo_server.py
+**/node_modules
 **/__pycache__
 **/*.pyc
 .pytest_cache
