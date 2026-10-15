@@ -4,6 +4,7 @@
 
 ### Added
 
+- Ten `creds_*` tools, ordered role bindings with `position`, `creds_bindings`; `stdio-box policy-example`.
 - Package `notion` 1.0.0 (@notionhq/notion-mcp-server 2.5.2).
 - Per-profile instances with lazy start, idle stop, LRU eviction, ping-based restart, backoff; user, ordered role and default bindings; per-variant tool sets; call audit.
 - One image for every provider; provider directories under `packages/`; descriptor format `provider-v1`; `stdio-box validate-provider`.

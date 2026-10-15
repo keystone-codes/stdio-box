@@ -23,7 +23,8 @@ _USAGE = """usage: stdio-box validate-provider <provider-directory>
        stdio-box serve (--spawner inline | --spawner-fd N) --installed JSON
        stdio-box debug-spawn --slot N
        stdio-box install [--provider-dir DIR] [--cache DIR]
-       stdio-box snapshot-tools [--provider-dir DIR] [--out PATH|-] [--check] [--env-file PATH]"""
+       stdio-box snapshot-tools [--provider-dir DIR] [--out PATH|-] [--check] [--env-file PATH]
+       stdio-box policy-example --namespace <ns> [--provider-dir DIR] [--critical <child>...]"""
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -61,6 +62,8 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(run_install(args[1:]))
     if command == "snapshot-tools":
         raise SystemExit(snapshot_main(args[1:]))
+    if command == "policy-example":
+        raise SystemExit(_policy_example(args[1:]))
     print(_USAGE, file=sys.stderr)
     raise SystemExit(2)
 
@@ -107,6 +110,14 @@ def serve_http(spawner: object | None = None, installed: InstalledServer | None 
     forwarder, whoami, background, form_stats = _routing(
         config, provider, catalog, snapshot, store, spawner, installed
     )
+    creds = None
+    if store is not None and form_stats is not None:
+        from stdio_box.catalog import Catalog
+        from stdio_box.creds_tools import CredsDeps
+        from stdio_box.instances import InstanceManager
+
+        if isinstance(form_stats, InstanceManager) and isinstance(catalog, Catalog):
+            creds = CredsDeps(config, store, form_stats, catalog)
     app = build_app(
         config,
         provider,
@@ -117,6 +128,7 @@ def serve_http(spawner: object | None = None, installed: InstalledServer | None 
         whoami=whoami,
         background=background,
         form_stats=form_stats,
+        creds=creds,
     )
     try:
         uvicorn.run(app, host="0.0.0.0", port=config.port)
@@ -230,6 +242,75 @@ def _open_store(config: Config, provider: Provider) -> tuple[Store | None, bool]
     except StoreSchemaNewer:
         return None, True
     return store, False
+
+
+def _policy_example(argv: list[str]) -> int:
+    """Print the sample policy for one namespace. Exit 2 on usage errors."""
+    namespace: str | None = None
+    provider_dir: str | None = None
+    critical: list[str] = []
+    index = 0
+    while index < len(argv):
+        flag = argv[index]
+        if flag in {"--namespace", "--provider-dir", "--critical"} and index + 1 >= len(argv):
+            print(_POLICY_USAGE, file=sys.stderr)
+            return 2
+        if flag == "--namespace":
+            namespace = argv[index + 1]
+            index += 2
+            continue
+        if flag == "--provider-dir":
+            provider_dir = argv[index + 1]
+            index += 2
+            continue
+        if flag == "--critical":
+            critical.append(argv[index + 1])
+            index += 2
+            continue
+        print(_POLICY_USAGE, file=sys.stderr)
+        return 2
+    if namespace is None:
+        print(_POLICY_USAGE, file=sys.stderr)
+        return 2
+    directory = provider_dir
+    if directory is None:
+        from stdio_box.config import ConfigError, load_settings
+
+        try:
+            settings = load_settings()
+        except ConfigError as exc:
+            for message in exc.messages:
+                print(f"config error: {message}", file=sys.stderr)
+            return 2
+        if settings.provider_dir is None:
+            print("config error: provider directory is required", file=sys.stderr)
+            return 2
+        directory = str(settings.provider_dir)
+    from stdio_box.creds_tools import render_policy_example
+
+    snapshot_path = Path(directory) / "tools.snapshot.json"
+    try:
+        provider = load_provider(directory)
+        snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        catalog = build_catalog(snapshot, provider)
+        text = render_policy_example(provider, catalog, namespace, critical)
+    except (
+        ProviderError,
+        CatalogError,
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        ValueError,
+    ) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(text, end="")
+    return 0
+
+
+_POLICY_USAGE = (
+    "usage: stdio-box policy-example --namespace <ns> [--provider-dir DIR] [--critical <child>...]"
+)
 
 
 def _validate_provider(directory: str) -> int:

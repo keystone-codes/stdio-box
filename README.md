@@ -394,6 +394,25 @@ What this does not protect:
 
 A database written by a newer build is not opened and is not modified. An internal `/healthz` then answers 503. A request that arrived through the public domain (`X-Forwarded-Host`) gets the same status code and an empty body.
 
+## Box tools
+
+An administrator configures the box from chat. These ten tools are part of the server's catalog. Secret values never travel in either direction: a tool result, a refusal, a log line, and an audit row never contain one. The person who owns the account types secrets on the one-time form.
+
+| Tool | What it does |
+|---|---|
+| `creds_providers` | The provider in this box: variants, which fields are secret, `server.installed_key`, and `isolation`. |
+| `creds_profiles` | Profiles, their non-secret fields, last check, bindings, and the instance if one is running. |
+| `creds_bindings` | Every binding in the order a call is resolved: `user`, then `role` by position, then `default`. Each row includes the profile's state. |
+| `creds_profile_create` | Create a profile. When the variant has secret fields, the result is a one-time link. |
+| `creds_profile_rotate` | Change non-secret fields, or issue a new link so the secrets can be entered again. |
+| `creds_profile_delete` | Delete a profile that nothing is bound to, and stop its instance. |
+| `creds_bind` | Bind `user:<email>`, `user:svc:<name>`, `role:<role>`, or `default` to a profile. |
+| `creds_unbind` | Remove one binding. Role positions below it move up. |
+| `creds_whoami` | Which profile this caller would use, which binding won, and which other role bindings were skipped. |
+| `creds_check` | Run the variant's checks and start the instance. Both have to succeed. |
+
+`creds_profile_create` and `creds_profile_rotate` accept only non-secret fields. Naming a secret field, in any letter case, is refused and the value is discarded. A field of type `url` is checked before anything is written. Changing a URL, or any field that a check places in a URL or a header, requires the secrets to be entered again on the form. Stored secrets are never sent to a new address.
+
 ## Bindings and their order
 
 The box picks one profile for a call, in this order:
@@ -405,6 +424,18 @@ The box picks one profile for a call, in this order:
 There is no error when several roles match. The administrator sets the order with `credsctl bind <subject> <profile> --position N`. A new role binding without `--position` goes to the end. `--replace --position N` moves an existing role binding and can point it at another profile. Removing a role binding closes the gap so positions stay `1, 2, 3` with no holes. `user:` and `default` have no position.
 
 Profile state does not affect the choice. If the first match needs its secrets entered again, the call uses that profile and fails, instead of quietly using the next account.
+
+`creds_bindings` is that same order, with the profile state on every row. `user` is sorted by subject. `role` is `position` 1, 2, 3 with no holes. `default` is last, or null when it is not set. `creds_whoami` says which row won (`tier` and `binding`, including `position` for a role) and lists the caller's other role rows under `not_used`, because they were lower in the order. `hint` names the binding to move up.
+
+To put a role binding somewhere else, call `creds_bind` again with `replace: true` and the new `position`. The reply for a role includes `order`, the full role list after the change. A new role binding without `position` goes to the end. `position` on `user:` or `default` is refused. `user:` and `default` have no position.
+
+## Recommended policy
+
+The box does not check roles. Whoever the policy lets call `<ns>_creds_*` manages everyone's accounts in this box. That is the administrator's decision and their responsibility. The box does not keep an allow-list of administrators.
+
+Do not give `<ns>_*` to an ordinary role. A pattern is matched against the full published name, so `billing_*` covers **every** tool of namespace `billing`, including `billing_admin_report`. The same pattern on this box also covers `<ns>_creds_profile_delete` and the other account tools. List the tool names the role should have. `stdio-box policy-example --namespace <ns>` prints a reader role and a writer role that do that, and a `<ns>_box_admin` role whose only grant is `<ns>_creds_*`. keystonectl prints that file and does not merge it into the policy.
+
+The five tools that change accounts (`creds_profile_create`, `creds_profile_rotate`, `creds_profile_delete`, `creds_bind`, `creds_unbind`) are listed in `requires_human_identity`. Only a signed-in person may change accounts. An API key or a service account must not: those calls act for a machine, and a machine must not be able to rebind the accounts everyone else uses. The door enforces that list. The box does not.
 
 ## Moving or reinstalling a box
 
