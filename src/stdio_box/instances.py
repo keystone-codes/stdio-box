@@ -9,7 +9,7 @@ import os
 import time
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
 import anyio
@@ -20,7 +20,7 @@ from mcp.shared.exceptions import McpError
 from stdio_box.catalog import Catalog
 from stdio_box.child_io import open_child_session
 from stdio_box.ids import slot_cwd
-from stdio_box.provider import Provider
+from stdio_box.provider import Provider, Variant
 from stdio_box.refusals import (
     INSTANCE_BUSY,
     INSTANCE_FAILED,
@@ -54,6 +54,7 @@ STATUS_INTERVAL_SECONDS = 10
 REVISION_POLL_SECONDS = 2
 AUDIT_PURGE_INTERVAL_SECONDS = 3600
 SESSION_CLOSE_SECONDS = 3
+_EPHEMERAL_ID = "ephemeral-check"
 
 _CONNECTION_CLOSED = -32000
 _REQUEST_TIMEOUT = 408
@@ -98,6 +99,8 @@ class Instance:
         self.owner_started = False
         self.last_call_at = time.monotonic()
         self.started_at = 0.0
+        self.started_at_iso: str | None = None
+        self.last_call_at_iso: str | None = None
         self.in_flight = 0
         self.missed_pings = 0
         self.retry_at = 0.0
@@ -220,6 +223,41 @@ class InstanceManager:
     def current(self, profile_id: str) -> Instance | None:
         return self._current.get(profile_id)
 
+    async def stop_profile(self, profile_id: str) -> None:
+        """Stop the profile's child when a profile is deleted."""
+        await self._stop_profile(profile_id)
+
+    @asynccontextmanager
+    async def start_ephemeral(
+        self,
+        provider: Provider,
+        variant: Variant,
+        values: Mapping[str, str],
+    ) -> AsyncIterator[ClientSession | None]:
+        """Run one credential check on a free slot, then stop that child.
+
+        The slot is an ordinary instance slot. Nothing is evicted to free one:
+        when every slot is taken, or this manager is not running, the yield is
+        ``None``. The child is not stored as a profile instance. ``reap_slot``
+        runs before the start and again after the caller is done.
+        """
+        slot = self._free_slot()
+        if slot is None or self._tg is None:
+            yield None
+            return
+        self._slots[slot] = _EPHEMERAL_ID
+        inst = Instance(_EPHEMERAL_ID, 1, 0, slot)
+        session: ClientSession | None = None
+        try:
+            session = await self._boot_ephemeral(inst, provider, variant, values, slot)
+        except Exception:
+            _LOG.warning("ephemeral check did not start")
+            session = None
+        try:
+            yield session
+        finally:
+            await self._release_ephemeral(inst, slot)
+
     def reset_failed(self, profile_id: str) -> None:
         """Clear a profile that exhausted its start attempts.
 
@@ -302,6 +340,7 @@ class InstanceManager:
             raise InstanceError(_unavailable(1))
         inst.in_flight += 1
         inst.last_call_at = time.monotonic()
+        inst.last_call_at_iso = _iso_now()
         acquired = False
         try:
             try:
@@ -318,6 +357,7 @@ class InstanceManager:
                 inst.semaphore.release()
             inst.in_flight = max(0, inst.in_flight - 1)
             inst.last_call_at = time.monotonic()
+            inst.last_call_at_iso = _iso_now()
 
     async def observe_call_error(self, inst: Instance, exc: BaseException) -> bool:
         """Record a crash when the child is gone. Return whether it is gone."""
@@ -414,6 +454,8 @@ class InstanceManager:
             inst.state = "running"
             inst.started_at = time.monotonic()
             inst.last_call_at = inst.started_at
+            inst.started_at_iso = _iso_now()
+            inst.last_call_at_iso = inst.started_at_iso
             self._failures.pop(profile.id, None)
             return inst
         except InstanceError:
@@ -422,6 +464,63 @@ class InstanceManager:
             _LOG.warning("instance %s failed to start (%s)", profile.id, type(exc).__name__)
             refusal = await self._abort_start(inst)
             raise InstanceError(refusal) from None
+
+    async def _boot_ephemeral(
+        self,
+        inst: Instance,
+        provider: Provider,
+        variant: Variant,
+        values: Mapping[str, str],
+        slot: int,
+    ) -> ClientSession | None:
+        await anyio.to_thread.run_sync(lambda: self._spawner.reap_slot(slot))
+        profile, secrets = _candidate_profile(provider, variant, values)
+        argv, env, masks = build_child_launch(
+            self._argv,
+            slot=slot,
+            slot_root=self._slot_root,
+            provider=provider,
+            profile=profile,
+            secrets=secrets,
+        )
+        home = slot_cwd(slot, self._slot_root)
+        tmp = os.path.join(home, "tmp")
+        await anyio.to_thread.run_sync(lambda: os.makedirs(tmp, mode=0o700, exist_ok=True))
+        handle = await anyio.to_thread.run_sync(lambda: self._spawner.spawn(slot, argv, env, home))
+        inst.handle = handle
+        inst.pid = handle.pid
+        note_child_isolation(handle.isolation)
+        inst.closed = anyio.Event()
+        inst.owner_done = anyio.Event()
+        inst.pump = StderrPump(handle.take_stderr(), inst.profile_id, inst.generation, masks, slot)
+        inst.pump.start()
+        if self._tg is None:
+            return None
+        ready = anyio.Event()
+        inst.owner_started = True
+        self._tg.start_soon(self._own_session, inst, ready)
+        await ready.wait()
+        if inst.session is None:
+            return None
+        with anyio.fail_after(self._start_timeout):
+            await inst.session.initialize()
+        return inst.session
+
+    async def _release_ephemeral(self, inst: Instance, slot: int) -> None:
+        try:
+            await self._close_session(inst)
+            if inst.pid is not None:
+                await self._stop_pid(inst.pid)
+        except Exception:
+            _LOG.warning("ephemeral stop failed")
+        if inst.pump is not None:
+            await anyio.to_thread.run_sync(inst.pump.close)
+            inst.pump = None
+        quarantined = await self._reap(slot)
+        self._slots.pop(slot, None)
+        if quarantined:
+            self._quarantine.add(slot)
+            _LOG.warning("slot %s quarantined", slot)
 
     async def _own_session(self, inst: Instance, ready: anyio.Event) -> None:
         if inst.handle is None:
@@ -817,6 +916,47 @@ class InstanceManager:
         except PermissionError:
             return False
         return False
+
+
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _candidate_profile(
+    provider: Provider,
+    variant: Variant,
+    values: Mapping[str, str],
+) -> tuple[Profile, dict[str, str]]:
+    """Public fields and secrets for one check, taken from ``values`` only."""
+    fields = {field.name: field for field in provider.fields}
+    public: dict[str, str] = {}
+    secrets: dict[str, str] = {}
+    for name in variant.fields:
+        field = fields.get(name)
+        if field is None or name not in values:
+            continue
+        if field.secret:
+            secrets[name] = values[name]
+        else:
+            public[name] = values[name]
+    profile = Profile(
+        id=_EPHEMERAL_ID,
+        provider=provider.name,
+        name="check",
+        variant=variant.name,
+        description=None,
+        state="ready",
+        public_fields=public,
+        version=1,
+        created_at="",
+        created_by="",
+        rotated_at=None,
+        rotated_by=None,
+        last_check_at=None,
+        last_check_ok=None,
+        last_check_identity=None,
+    )
+    return profile, secrets
 
 
 def _unavailable(remaining: float) -> Refusal:
