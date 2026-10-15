@@ -26,6 +26,11 @@ Only the door calls the box. A person reaches it through an agent signed in at t
 | `BOX_ALLOWED_HOSTS` | empty | comma-separated host names |
 | `BOX_DEBUG` | unset | `1` enables `debug-spawn` |
 | `BOX_CHILD_ARGV_OVERRIDE` | unset | child program path, used only when `BOX_DEBUG=1` |
+| `BOX_MAX_INSTANCES` | `8` | integer from 1 to 32 |
+| `BOX_IDLE_SECONDS` | `600` | integer from 1 to 31536000 |
+| `BOX_START_TIMEOUT_SECONDS` | `60` | integer from 1 to 31536000 |
+| `BOX_CALL_TIMEOUT_SECONDS` | `120` | integer from 1 to 31536000 |
+| `BOX_AUDIT_RETENTION_DAYS` | `30` | integer from 1 to 3650 |
 
 `BOX_DEBUG` and `BOX_CHILD_ARGV_OVERRIDE` are spawner settings. A missing value is not an error. `BOX_DEBUG=1` enables `debug-spawn`. Together with `BOX_CHILD_ARGV_OVERRIDE`, it names the child program and `launch` does not install.
 
@@ -53,7 +58,58 @@ The snapshot's `server.command` must equal the provider's `server.command`. Publ
 
 `GET /healthz` does not check the bearer token. A request that carries `X-Forwarded-Host` (the door's proxy, from the public domain) gets the status code and `{}`. Any other request gets `status`, `store`, `isolation`, and `install`. `isolation` is the wrapper's current value: `unknown` until a child starts, then `per_slot_uid` or `shared_uid`. `install` is `unknown` until launch has installed a server; then it is `key`, `at`, `duration_ms`, and `from_cache`. A store schema newer than this process is HTTP 503. A key that does not match is HTTP 200 with `status` `degraded` and `store` `key_mismatch`.
 
-Calls of the provider's tools answer `not_available` until a child can run them. The `creds_*` tools answer `not_available` as well, except `creds_providers`, which describes the loaded provider. Its `isolation` and `server.installed_key` are `"unknown"` until those checks report.
+A call of a provider tool is routed to one profile, described under [How a call is routed](#how-a-call-is-routed). `creds_providers` describes the loaded provider. `creds_whoami` reports which profile this caller would use and does not refuse. The other `creds_*` tools answer `not_available` in this build. `isolation` and `server.installed_key` are `"unknown"` until those checks report.
+
+## How a call is routed
+
+Each call reads the caller's identity again. Nothing about the choice is cached.
+
+1. A binding `user:<sub>` wins. `sub` is lowercased, so `user:Ann@Example.com` matches `ann@example.com`. A service account is the same rule with `sub` `svc:<name>`: the binding is `user:svc:<name>`.
+2. When `rbac` is not `off`, role bindings are checked in ascending `position`. The first role that is in the caller's `roles` wins. Other roles of that caller that sit lower are not used. Two roles never refuse the call; the administrator's order decides. When `rbac` is `off`, this step is skipped because the assertion carries no roles.
+3. The `default` binding.
+4. Otherwise the call is refused with `no_credentials_profile`: "There is no <title> account for you in this box. Ask an administrator to bind one to you or to your role."
+
+The profile's state does not change which binding wins. If the winning profile has no secrets yet, or its secrets cannot be read, the call is `profile_needs_reentry` and does not fall through to a later binding. A profile that is `ready` or `check_failed` is allowed to run.
+
+The tool must be in the profile variant's `tools` patterns (or the variant must list no patterns, which allows every tool). Otherwise the call is `tool_not_in_profile` and the child is not started: "The account <profile> (<variant title>) does not include <tool>. Ask an administrator for an account that covers it."
+
+`creds_whoami` returns the same choice without refusing: `sub`, `sub_type`, `roles`, `rbac`, `profile`, `tier` (`user`, `role`, or `default`), the winning `binding`, `not_used` (lower role bindings that also matched), the variant's tool patterns, `would_refuse`, and a `hint`. When `not_used` is not empty, the hint says the higher binding was used and how to move another up with `creds_bind … --replace --position`.
+
+## Instances
+
+One profile has at most one child. The child starts on the first call and stops when it is idle. The instance key is the profile id and its secret version.
+
+| Limit | Setting | Default | What happens |
+|---|---|---|---|
+| Live instances | `BOX_MAX_INSTANCES` | 8 (1–32) | A new profile evicts the idle instance with the oldest `last_call_at`. If every instance has a call in flight, the call is `instances_exhausted` (retryable). |
+| Idle stop | `BOX_IDLE_SECONDS` | 600 | A background pass every 30 seconds stops an instance with no calls in flight for longer than this. |
+| Start | `BOX_START_TIMEOUT_SECONDS` | 60 | `initialize` must answer within this. Otherwise the start counts as a failure. |
+| Call | `BOX_CALL_TIMEOUT_SECONDS` | 120 | The call is `upstream_timeout` and the child is sent `notifications/cancelled`. |
+| Calls at once on one instance | constant | 8, wait 30 seconds | `instance_busy` (retryable). One slow account does not take the slots of the others. |
+| Ping | constants | every 15 seconds, timeout 5 seconds, restart after 3 misses in a row | One missed ping does not restart. The log says `instance <profile> missed ping n/3`. |
+| Restart after a crash | constants | 1 second, doubling up to 60 seconds; back to 1 second after 60 seconds of stable running | During the wait the call is `instance_unavailable` with `retry_after_seconds`. |
+| Failed starts | constant | 5 in a row, then `failed` | The call is `instance_failed` until a credential check or a rotation clears it. |
+| Stop | constants | close the session, then the spawner closes stdin, waits 2 seconds, `SIGTERM`, waits 5 seconds, `SIGKILL` | In-flight calls fail as soon as the session closes. |
+| stderr | constants | 50 lines per second, burst 200 | Suppressed lines are counted. Field values of length 6 or more are masked. |
+| Child environment | — | `PATH`, `HOME=/tmp/box/slot-N`, `TMPDIR`, `LANG=C.UTF-8`, `server.static_env`, and the variant's fields | The wrapper's environment is not inherited. A field that is not part of the variant is not passed. |
+| Slot cleanup | — | before the slot is given out, and after the child stops | A slot whose cleanup failed is quarantined and is not given out again. |
+
+The wrapper also reads `meta.revision` every 2 seconds. If a live profile was deleted, its version changed, or it now needs its secrets again, that instance is stopped (a version change lets in-flight calls finish for up to 30 seconds). `credsctl` therefore applies without restarting the container. Audit rows older than `BOX_AUDIT_RETENTION_DAYS` are deleted once an hour. A status snapshot is written about every 10 seconds for `credsctl status`.
+
+## Changing limits
+
+Set the `BOX_*` limits in the package override, under `environment:`. The file is `packages/<package>.override.yml`.
+
+```yaml
+environment:
+  BOX_MAX_INSTANCES: "4"
+  BOX_IDLE_SECONDS: "300"
+  BOX_START_TIMEOUT_SECONDS: "60"
+  BOX_CALL_TIMEOUT_SECONDS: "120"
+  BOX_AUDIT_RETENTION_DAYS: "30"
+```
+
+A value outside the accepted range is a config error. The process exits 2 and names the variable. The ping, backoff, and per-instance concurrency numbers are not variables.
 
 ## One image, many providers
 
