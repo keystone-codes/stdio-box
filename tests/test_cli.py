@@ -29,11 +29,16 @@ def test_validate_provider_exit_codes(tmp_path: Path, capsys: pytest.CaptureFixt
     assert "name: must equal directory name 'echo'" in captured.out
 
 
-def test_launch_is_a_stub(capsys: pytest.CaptureFixture[str]) -> None:
+def test_launch_requires_a_command(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("BOX_COMMAND", raising=False)
+    monkeypatch.delenv("BOX_PROVIDER", raising=False)
+    monkeypatch.delenv("BOX_PROVIDER_DIR", raising=False)
     with pytest.raises(SystemExit) as exc:
         main(["launch"])
     assert exc.value.code == 2
-    assert capsys.readouterr().err.strip() == "launch is not implemented yet"
+    assert "config error: BOX_COMMAND is required" in capsys.readouterr().err
 
 
 def test_credsctl_prints_usage(capsys: pytest.CaptureFixture[str]) -> None:

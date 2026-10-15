@@ -17,4 +17,13 @@ The image build copies `packages/` to `/opt/box/packages/`. `.dockerignore` leav
 
 The server's own code does not. On first start the box installs the locked server into the `cache` volume. Later starts reuse that volume and do not need the network. A mirror (`BOX_PIP_INDEX_URL`, `BOX_NPM_REGISTRY`) is enough for a host that cannot reach the public indexes. This release does not publish an image with a server already installed.
 
+Build the lock from the provider directory:
+
+```sh
+uv pip compile --universal --generate-hashes --python-version 3.12 requirements.in -o requirements.txt
+npm install --package-lock-only
+```
+
+`tools.snapshot.json` comes from `keystonectl package wrap-stdio`, which runs `stdio-box snapshot-tools` in the image.
+
 Names for this release, without a `-box` suffix: `atlassian` (Jira and Confluence), `notion`, `tavily`, `yandex-tracker`, `yandex-wiki`. Those directories are added by later changes. The echo server and the atlassian descriptor used by tests live under `tests/data/packages/`.

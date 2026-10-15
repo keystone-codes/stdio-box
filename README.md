@@ -26,7 +26,7 @@ PID 1  tini                                 (root; reaps orphaned children)
          child  uid 20000+slot              (one profile's server; HOME=/tmp/box/slot-N)
 ```
 
-`stdio-box launch` is the process the image starts. The install step, the spawner, and the HTTP wrapper are filled in by later changes; this revision of `launch` reports that it is not implemented yet.
+`stdio-box launch` is the process the image starts. It installs the provider server into `/cache` and then exits. The spawner and the HTTP wrapper attach to that install step in a later change.
 
 | Path | Owner | Mode | Use |
 |---|---|---|---|
@@ -35,6 +35,38 @@ PID 1  tini                                 (root; reaps orphaned children)
 | `/tmp/box` | root | `0711` | Per-slot homes for children |
 
 The image does not set `USER`. `launch` starts as root so it can drop to these uids.
+
+## Installing the server
+
+The image does not contain the provider's server. `BOX_PROVIDER` selects `/opt/box/packages/<BOX_PROVIDER>` (or `BOX_PROVIDER_DIR` when that is set). `BOX_COMMAND` names the server and its exact version. The box parses that string with `shlex`. It does not run it in a shell, and it does not invoke `uvx` or `npx` while the container is up.
+
+Grammar:
+
+- `uvx <distribution>==<version> [arguments…]`
+- `npx [-y|--yes] <package>@<version> [arguments…]` (`<package>` may be `@scope/name`)
+
+The version is exact. A Python version must be a single `packaging` version. An npm version must be `X.Y.Z` or `X.Y.Z-<prerelease>`. Ranges, `latest`, and `^ ~ > < * x` are rejected (`box_command_invalid`). A flag before the package (`--from`, `--with`, `-p`, and any other) is rejected: those flags would skip the lock file. Arguments after the package are kept for the child process.
+
+Before installation, the command is checked against the provider lock (`box_command_not_locked` when it does not match):
+
+- Python: `requirements.txt` has a line for the normalized distribution name at that exact version, with at least one `--hash=sha256:`, and every requirement line has a sha256 hash.
+- Node: `package.json` `dependencies` is exactly that package and version, `package-lock.json` is lockfileVersion 3, `packages["node_modules/<package>"].version` is that version, and every downloaded package has `integrity`.
+
+The installer runs as uid 10002 and writes `/cache/<provider>/<key>/`. The key is the first 16 hex characters of a SHA-256 over the lock bytes, `package.json` for Node, the installer kind, and the installer version baked into the image. If `<key>/.complete` already contains that key, the tree is reused and the network is not used. The first start needs a route to the index, or to a mirror. Later starts do not.
+
+Mirrors are visible only to the installer. `BOX_PIP_INDEX_URL` is passed as `UV_INDEX_URL`. `BOX_NPM_REGISTRY` is passed as `npm_config_registry`. When either is set it must start with `https://`. Hashes are checked for a mirror the same way as for the public index.
+
+`BOX_INSTALL_TIMEOUT_SECONDS` defaults to 240 and must be from 30 to 1800. A failed install logs `provider_install_failed` and `launch` exits 3. Docker's `restart: unless-stopped` starts the container again, and the install is tried again.
+
+A machine with no network and no mirror can be prepared by installing once where the index is reachable, then copying the Docker volume `ks-pkg-<name>-cache`. This release does not publish an image with the server already installed.
+
+The installed tree is owned by uid 10002. Directories are `0755`. Files are not writable by the group or by other users, so a child (uid `20000+slot`) can run the server and cannot change it. Nothing except the installer runs as uid 10002.
+
+If the container cannot change uid (`user:` in an override, or the capabilities that `setuid` needs have been dropped), the installer runs without changing uid and the log records `install_isolation_unavailable`. In that `shared_uid` mode a child can modify the cache. The rest of `shared_uid` (children sharing the wrapper's uid) is wired with the spawner.
+
+`stdio-box install [--provider-dir DIR] [--cache DIR]` runs the same install without `launch`. When the caller is not root, it does not try to change uid.
+
+`stdio-box snapshot-tools` installs into a temporary cache, starts the server once, and writes `tools/list`. `keystonectl package wrap-stdio` runs it as `docker run --rm --entrypoint stdio-box -v <directory>:/opt/box/provider:ro -e BOX_PROVIDER_DIR=/opt/box/provider <image> snapshot-tools --out -`.
 
 ## `provider.yaml`
 
@@ -176,6 +208,19 @@ discovery:
     CONFLUENCE_API_TOKEN: discovery-placeholder
 identity_to_child: none
 ```
+
+## Adding a provider
+
+A provider is a directory `packages/<name>/`. The image build copies the directory's data (`provider.yaml`, the lock, `package.json` when the server is Node, and `tools.snapshot.json`) to `/opt/box/packages/<name>/`. Manifests and the provider README stay out of the image.
+
+Build the lock in that directory:
+
+```sh
+uv pip compile --universal --generate-hashes --python-version 3.12 requirements.in -o requirements.txt
+npm install --package-lock-only
+```
+
+`uv pip compile --universal` records wheels for more than one platform, and `uv pip install` honors those markers. Do not hand-write `tools.snapshot.json`. `keystonectl package wrap-stdio` runs `snapshot-tools` in this image and writes the file. Commit the lock and the snapshot with `provider.yaml`.
 
 ## Security model
 

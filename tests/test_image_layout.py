@@ -52,7 +52,7 @@ def test_image_layout(tmp_path: Path) -> None:
         ["docker", "run", "--rm", IMAGE], check=False, capture_output=True, text=True
     )
     assert launch.returncode == 2
-    assert "launch is not implemented yet" in launch.stderr
+    assert "config error: BOX_COMMAND is required" in launch.stderr
     checked = _run(["stdio-box", "validate-provider", "/opt/box/packages/echo"])
     assert checked.returncode == 0, checked.stdout + checked.stderr
 
