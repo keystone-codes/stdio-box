@@ -24,10 +24,6 @@ CHANGING_CREDS = (
     "creds_bind",
     "creds_unbind",
 )
-_MISSING_POLICY = (
-    "error recommended_policy: recommended_policy: policy.example.yaml does not exist\n"
-    "1 error, 0 warnings"
-)
 
 
 def _package_dirs() -> list[Path]:
@@ -83,13 +79,9 @@ def _critical(snapshot: dict) -> list[str]:
 
 
 def _assert_policy(package: Path, namespace: str) -> None:
-    rendered = _policy_example(namespace)
-    path = package / "policy.example.yaml"
-    if rendered is None:
-        assert not path.is_file()
-        return
-    assert path.read_text(encoding="utf-8") == rendered
-    document = yaml.safe_load(rendered)
+    rendered = _policy_example(package, namespace)
+    assert (package / "policy.example.yaml").read_bytes() == rendered
+    document = yaml.safe_load(rendered.decode("utf-8"))
     _assert_reader_writer(document, namespace)
 
 
@@ -105,17 +97,23 @@ def _assert_reader_writer(document: dict, namespace: str) -> None:
                 assert item in allowed_creds
 
 
-def _policy_example(namespace: str) -> str | None:
-    """Return stdout of ``policy-example``, or None when that command is not built yet."""
+def _policy_example(package: Path, namespace: str) -> bytes:
+    """Stdout of ``policy-example`` for this package, unchanged."""
     result = subprocess.run(
-        ["uv", "run", "stdio-box", "policy-example", "--namespace", namespace],
+        [
+            "uv",
+            "run",
+            "stdio-box",
+            "policy-example",
+            "--namespace",
+            namespace,
+            "--provider-dir",
+            str(package),
+        ],
         cwd=ROOT,
         check=False,
         capture_output=True,
-        text=True,
     )
-    if result.returncode == 2 and "policy-example" not in result.stderr:
-        return None
     assert result.returncode == 0, result.stderr
     return result.stdout
 
@@ -128,11 +126,5 @@ def _assert_lint(package: Path) -> None:
         capture_output=True,
         text=True,
     )
-    if _policy_example(package.name.replace("-", "_")) is None:
-        assert result.returncode != 0
-        assert result.stdout.strip() == _MISSING_POLICY
-        text = (package / "keystone-service.yaml").read_text(encoding="utf-8")
-        assert "recommended_policy: policy.example.yaml" in text
-        return
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "0 errors, 0 warnings"

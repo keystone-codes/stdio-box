@@ -13,6 +13,10 @@
 - The provider's server is installed at container start from its hash-pinned lock file into the `cache` volume, owned by a separate user; `stdio-box install`, `stdio-box snapshot-tools`.
 - One-time secret entry form under `/creds/`, provider checks over HTTP with host allow-lists and no private addresses by default, rotation that keeps old values until new ones pass the check.
 
+### Fixed
+
+- The slot `tmp` directory is created by the spawner, so a tool call can start the child after a credential check.
+
 ### Security
 
 - Children run under per-slot uids started by a root-only spawner; the wrapper is non-dumpable; child stderr is rate-limited and masked.
