@@ -28,6 +28,7 @@ from stdio_box.stderr import mask_line
 logger = logging.getLogger("stdio_box.install")
 
 INSTALLER_VERSION = "1"
+NODE_BIN = "/usr/local/bin/node"
 INSTALLER_UID = 10002
 PYTHON_BIN = "/usr/local/bin/python3.12"
 _INSTALLER_PATH = "/usr/local/bin:/usr/bin:/bin"
@@ -261,13 +262,20 @@ def _server(
     started: float,
 ) -> InstalledServer:
     binary = _executable(dest, provider)
+    argv0 = str(binary)
+    args = cmd.args
+    if provider.server.lock == "package-lock.json":
+        script = Path(os.path.realpath(binary))
+        node = NODE_BIN if Path(NODE_BIN).is_file() else (shutil.which("node") or NODE_BIN)
+        argv0 = node
+        args = (str(script), *cmd.args)
     return InstalledServer(
-        argv0=str(binary),
+        argv0=argv0,
         key=key,
         from_cache=from_cache,
         duration_ms=int((time.monotonic() - started) * 1000),
         at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        args=cmd.args,
+        args=args,
     )
 
 
