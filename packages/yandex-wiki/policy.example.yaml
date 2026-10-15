@@ -1,0 +1,19 @@
+# Example only. keystonectl prints this file and never merges it into your policy.
+# The box does not check roles: whoever the policy lets call yandex_wiki_creds_* manages
+# everyone's accounts in this box. Do not give a non-administrator role yandex_wiki_* :
+# it also matches yandex_wiki_creds_*.
+version: "2.0.0"
+default_deny: true
+roles:
+  yandex_wiki_reader:
+    description: "Read Yandex Wiki through the yandex_wiki box."
+    allow: [yandex_wiki_creds_whoami, yandex_wiki_creds_providers]
+  yandex_wiki_writer:
+    description: "Read and change Yandex Wiki through the yandex_wiki box."
+    allow: [yandex_wiki_convert_md_to_yfm, yandex_wiki_get_page_content, yandex_wiki_get_page, yandex_wiki_create_page, yandex_wiki_update_page, yandex_wiki_delete_page, yandex_wiki_clone_page, yandex_wiki_append_content, yandex_wiki_get_descendants, yandex_wiki_get_descendants_by_slug, yandex_wiki_get_page_resources, yandex_wiki_get_page_grids, yandex_wiki_create_grid, yandex_wiki_get_grid, yandex_wiki_update_grid, yandex_wiki_delete_grid, yandex_wiki_add_rows, yandex_wiki_delete_rows, yandex_wiki_add_columns, yandex_wiki_delete_columns, yandex_wiki_update_cells, yandex_wiki_move_rows, yandex_wiki_move_columns, yandex_wiki_clone_grid, yandex_wiki_get_tree, yandex_wiki_refresh_tree_cache, yandex_wiki_clear_tree_cache, yandex_wiki_suggest_placement, yandex_wiki_add_tree_section, yandex_wiki_remove_tree_section, yandex_wiki_set_tree, yandex_wiki_prompts_list, yandex_wiki_prompts_get, yandex_wiki_prompts_add, yandex_wiki_prompts_add_from_file, yandex_wiki_prompts_remove, yandex_wiki_creds_whoami, yandex_wiki_creds_providers]
+  yandex_wiki_box_admin:
+    description: "Manage accounts and bindings in the yandex_wiki box."
+    allow: ["yandex_wiki_creds_*"]
+critical_tools: [yandex_wiki_creds_profile_create, yandex_wiki_creds_profile_rotate, yandex_wiki_creds_profile_delete, yandex_wiki_creds_bind, yandex_wiki_creds_unbind]
+# Only a signed-in person may change accounts; API keys and service accounts may not.
+requires_human_identity: [yandex_wiki_creds_profile_create, yandex_wiki_creds_profile_rotate, yandex_wiki_creds_profile_delete, yandex_wiki_creds_bind, yandex_wiki_creds_unbind]

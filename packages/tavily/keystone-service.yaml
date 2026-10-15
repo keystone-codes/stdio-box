@@ -1,0 +1,74 @@
+schema_version: 1
+kind: service
+name: tavily
+version: 1.0.0
+publisher: keystone-codes
+summary: "Tavily search tools (tavily-mcp 0.2.22) behind Keystone; each person, service or role uses its own API key."
+homepage: https://github.com/keystone-codes/stdio-box/tree/tavily/v1.0.0/packages/tavily
+compat:
+  keystone_mcp: ">=0.5.0,<2.0"
+  contracts: [upstream-registry/1, identity-assertion/1]
+mcp:
+  container: mcp
+  transport: http
+  path: /mcp
+  healthz: /healthz
+  namespace: tavily
+  bearer_env: BOX_BEARER_TOKEN
+  tools:
+    - tavily_search
+    - tavily_extract
+    - tavily_crawl
+    - tavily_map
+    - tavily_research
+    - creds_providers
+    - creds_profiles
+    - creds_bindings
+    - creds_profile_create
+    - creds_profile_rotate
+    - creds_profile_delete
+    - creds_bind
+    - creds_unbind
+    - creds_whoami
+    - creds_check
+  critical:
+    - creds_profile_create
+    - creds_profile_rotate
+    - creds_profile_delete
+    - creds_bind
+    - creds_unbind
+identity:
+  signed_assertion: required
+  secret_env: BOX_IDENTITY_SECRET
+  audience_env: BOX_IDENTITY_AUDIENCE
+containers:
+  mcp:
+    # placeholder until the stdio-box image release records the digest
+    image: "ghcr.io/keystone-codes/stdio-box:0.1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    port: 8081
+    env:
+      - name: BOX_PROVIDER
+        default: "tavily"
+        description: "Provider directory inside the stdio-box image."
+      - name: BOX_COMMAND
+        default: "npx -y tavily-mcp@0.2.22"
+        description: "Server to run. The package and version must match the provider lock file."
+    secrets:
+      - name: BOX_STORE_KEY
+        generate:
+          bytes: 32
+    volumes:
+      - name: store
+        path: /data
+      - name: cache
+        path: /cache
+    healthcheck:
+      path: /healthz
+      interval: 10s
+      start_period: 300s
+needs: []
+requires: []
+public_paths:
+  - /creds/
+public_base_url_env: BOX_PUBLIC_BASE_URL
+recommended_policy: policy.example.yaml

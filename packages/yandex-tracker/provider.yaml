@@ -1,0 +1,46 @@
+schema_version: 1
+name: yandex-tracker
+title: Yandex Tracker
+server:
+  command: "npx -y @fractalizer/mcp-server-yandex-tracker@5.1.0"
+  bin: mcp-server-yandex-tracker
+  lock: package-lock.json
+fields:
+  - {name: YANDEX_TRACKER_TOKEN, type: string, secret: true, hint: "OAuth token from oauth.yandex.ru with Tracker access"}
+  - {name: YANDEX_ORG_ID, type: string, secret: false, hint: "Yandex 360 organization ID (Tracker, Administration, Organizations)"}
+  - {name: YANDEX_CLOUD_ORG_ID, type: string, secret: false, hint: "Yandex Cloud organization ID (Tracker, Administration, Organizations)"}
+variants:
+  - name: org
+    title: Yandex 360
+    fields: [YANDEX_TRACKER_TOKEN, YANDEX_ORG_ID]
+    checks:
+      - http:
+          method: GET
+          url: "https://api.tracker.yandex.net/v2/myself"
+          auth:
+            header: {name: Authorization, scheme: OAuth, field: YANDEX_TRACKER_TOKEN}
+          headers:
+            X-Org-ID: "{YANDEX_ORG_ID}"
+          expect_status: [200]
+          identity: display
+  - name: cloud_org
+    title: Yandex Cloud
+    fields: [YANDEX_TRACKER_TOKEN, YANDEX_CLOUD_ORG_ID]
+    checks:
+      - http:
+          method: GET
+          url: "https://api.tracker.yandex.net/v2/myself"
+          auth:
+            header: {name: Authorization, scheme: OAuth, field: YANDEX_TRACKER_TOKEN}
+          headers:
+            X-Cloud-Org-ID: "{YANDEX_CLOUD_ORG_ID}"
+          expect_status: [200]
+          identity: display
+tools:
+  normalize: none
+discovery:
+  mode: placeholder
+  env:
+    YANDEX_TRACKER_TOKEN: discovery-placeholder
+    YANDEX_ORG_ID: discovery-org
+identity_to_child: none

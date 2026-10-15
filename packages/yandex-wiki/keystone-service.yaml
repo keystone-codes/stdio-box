@@ -1,0 +1,109 @@
+schema_version: 1
+kind: service
+name: yandex-wiki
+version: 1.0.0
+publisher: keystone-codes
+summary: "Yandex Wiki tools (ya-wiki-mcp 0.3.1) behind Keystone; each person, service or role uses its own account."
+homepage: https://github.com/keystone-codes/stdio-box/tree/yandex-wiki/v1.0.0/packages/yandex-wiki
+compat:
+  keystone_mcp: ">=0.5.0,<2.0"
+  contracts: [upstream-registry/1, identity-assertion/1]
+mcp:
+  container: mcp
+  transport: http
+  path: /mcp
+  healthz: /healthz
+  namespace: yandex_wiki
+  bearer_env: BOX_BEARER_TOKEN
+  tools:
+    - convert_md_to_yfm
+    - get_page_content
+    - get_page
+    - create_page
+    - update_page
+    - delete_page
+    - clone_page
+    - append_content
+    - get_descendants
+    - get_descendants_by_slug
+    - get_page_resources
+    - get_page_grids
+    - create_grid
+    - get_grid
+    - update_grid
+    - delete_grid
+    - add_rows
+    - delete_rows
+    - add_columns
+    - delete_columns
+    - update_cells
+    - move_rows
+    - move_columns
+    - clone_grid
+    - get_tree
+    - refresh_tree_cache
+    - clear_tree_cache
+    - suggest_placement
+    - add_tree_section
+    - remove_tree_section
+    - set_tree
+    - prompts_list
+    - prompts_get
+    - prompts_add
+    - prompts_add_from_file
+    - prompts_remove
+    - creds_providers
+    - creds_profiles
+    - creds_bindings
+    - creds_profile_create
+    - creds_profile_rotate
+    - creds_profile_delete
+    - creds_bind
+    - creds_unbind
+    - creds_whoami
+    - creds_check
+  critical:
+    - delete_page
+    - delete_grid
+    - delete_rows
+    - delete_columns
+    - creds_profile_create
+    - creds_profile_rotate
+    - creds_profile_delete
+    - creds_bind
+    - creds_unbind
+identity:
+  signed_assertion: required
+  secret_env: BOX_IDENTITY_SECRET
+  audience_env: BOX_IDENTITY_AUDIENCE
+containers:
+  mcp:
+    # placeholder until the stdio-box image release records the digest
+    image: "ghcr.io/keystone-codes/stdio-box:0.1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    port: 8081
+    env:
+      - name: BOX_PROVIDER
+        default: "yandex-wiki"
+        description: "Provider directory inside the stdio-box image."
+      - name: BOX_COMMAND
+        default: "uvx ya-wiki-mcp==0.3.1"
+        description: "Server to run. The package and version must match the provider lock file."
+    secrets:
+      - name: BOX_STORE_KEY
+        generate:
+          bytes: 32
+    volumes:
+      - name: store
+        path: /data
+      - name: cache
+        path: /cache
+    healthcheck:
+      path: /healthz
+      interval: 10s
+      start_period: 300s
+needs: []
+requires: []
+public_paths:
+  - /creds/
+public_base_url_env: BOX_PUBLIC_BASE_URL
+recommended_policy: policy.example.yaml
