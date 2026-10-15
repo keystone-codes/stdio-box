@@ -5,6 +5,7 @@ belong in this file beside this test, not in a second copy of the scan.
 """
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -17,6 +18,10 @@ from stdio_box.provider import Provider, load_provider
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGES = ROOT / "packages"
+_IMAGE_REF = re.compile(
+    r"^ghcr\.io/keystone-codes/stdio-box:"
+    r"(?P<tag>[0-9]+\.[0-9]+\.[0-9]+)@sha256:(?P<digest>[0-9a-f]{64})$"
+)
 CHANGING_CREDS = (
     "creds_profile_create",
     "creds_profile_rotate",
@@ -48,6 +53,9 @@ def test_provider_package(package: Path) -> None:
     namespace = manifest["mcp"]["namespace"]
     assert namespace == package.name.replace("-", "_")
     defaults = {item["name"]: item.get("default") for item in manifest["containers"]["mcp"]["env"]}
+    image = manifest["containers"]["mcp"]["image"]
+    assert isinstance(image, str)
+    assert _IMAGE_REF.fullmatch(image)
     assert defaults["BOX_PROVIDER"] == package.name
     assert defaults["BOX_COMMAND"] == provider.server.command
 
@@ -62,6 +70,32 @@ def test_provider_package(package: Path) -> None:
 
     _assert_policy(package, namespace)
     _assert_lint(package)
+
+
+def test_released_image_digest_matches_packages_on_that_tag() -> None:
+    """Once IMAGE records a release, packages on that tag use its digest."""
+    pinned = _pinned_image()
+    if pinned is None:
+        return
+    match = _IMAGE_REF.fullmatch(pinned)
+    assert match is not None
+    tag = match.group("tag")
+    for package in _package_dirs():
+        manifest = yaml.safe_load((package / "keystone-service.yaml").read_text(encoding="utf-8"))
+        image = manifest["containers"]["mcp"]["image"]
+        image_match = _IMAGE_REF.fullmatch(image)
+        assert image_match is not None
+        if image_match.group("tag") == tag:
+            assert image == pinned
+
+
+def _pinned_image() -> str | None:
+    for line in (ROOT / "IMAGE").read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        return stripped
+    return None
 
 
 def _critical(snapshot: dict, provider: Provider) -> list[str]:
