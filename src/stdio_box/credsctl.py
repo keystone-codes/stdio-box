@@ -1,10 +1,12 @@
 """Operator CLI for profiles, ordered bindings, and the store key.
 
-Field values are never printed. A credential check is not performed here: an
-import that asks for one reports ``check: unreachable`` and still exits 0.
-Exit 1 is reserved for a provider that rejects the values.
+Field values are never printed. ``profile import`` runs the variant's HTTP
+checks before it writes, unless ``--no-check`` is set. A provider refusal
+exits 1 and writes nothing. A check that cannot be reached still writes and
+exits 0 with ``check: unreachable``.
 """
 
+import asyncio
 import json
 import os
 import re
@@ -12,6 +14,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from stdio_box.checks import run_checks, variant_title
 from stdio_box.provider import Provider, ProviderError, load_provider
 from stdio_box.store.errors import (
     BindingExists,
@@ -23,6 +26,7 @@ from stdio_box.store.errors import (
     StoreSchemaNewer,
 )
 from stdio_box.store.repo import Store, normalize_subject
+from stdio_box.url_policy import url_policy_from_mapping
 
 _USAGE = """usage: credsctl [--json] <command> [<args>]
        credsctl profile list
@@ -70,6 +74,12 @@ class _Unavailable(Exception):
         super().__init__(message)
 
 
+class _Rejected(Exception):
+    def __init__(self, message: str) -> None:
+        self.message = message
+        super().__init__(message)
+
+
 def credsctl_main(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     json_mode, rest = _extract_json(args)
@@ -81,6 +91,8 @@ def credsctl_main(argv: list[str] | None = None) -> None:
         result = _dispatch(rest)
     except _Usage as exc:
         _exit(json_mode, ok=False, code=2, error=_error("usage", exc.message), result=None)
+    except _Rejected as exc:
+        _exit(json_mode, ok=False, code=1, error=_error("check_failed", exc.message), result=None)
     except _Input as exc:
         _exit(
             json_mode, ok=False, code=3, error=_error(exc.error_id, exc.message), result=exc.result
@@ -210,6 +222,19 @@ def _import_profile(args: list[str]) -> dict:
         existing = store.get_profile(profile_id)
         if existing is not None and flags["--if-absent"]:
             raise _Exists("profile already exists")
+        check_result = None
+        if not flags["--no-check"]:
+            check_result = asyncio.run(
+                run_checks(
+                    provider,
+                    variant,
+                    {**public, **secret},
+                    instances=None,
+                    config=url_policy_from_mapping(os.environ),
+                )
+            )
+            if check_result.ok is False:
+                raise _Rejected(_rejection_message(variant, check_result))
         if existing is None:
             try:
                 store.create_profile(
@@ -229,7 +254,14 @@ def _import_profile(args: list[str]) -> dict:
                 description=description,
             )
             action = "rotated"
-        check = "skipped" if flags["--no-check"] else "unreachable"
+        if check_result is not None:
+            store.set_check(
+                profile_id,
+                check_result.ok,
+                check_result.identity,
+                datetime.now(timezone.utc),
+            )
+        check = "skipped" if flags["--no-check"] else _check_label(check_result)
         result = {
             "profile": profile_id,
             "variant": variant.name,
@@ -454,6 +486,20 @@ def _status(args: list[str]) -> dict:
         return document
     finally:
         store.close()
+
+
+def _rejection_message(variant, result) -> str:
+    title = variant_title(variant)
+    status = next((item["http_status"] for item in result.results if item["ok"] is False), None)
+    if isinstance(status, int):
+        return f"{title} did not accept these values (HTTP {status})"
+    return f"{title} did not accept these values"
+
+
+def _check_label(result) -> str:
+    if result is None or result.ok is None:
+        return "unreachable"
+    return "ok"
 
 
 def _select_variant(provider: Provider, present: set[str], requested: str | None):
