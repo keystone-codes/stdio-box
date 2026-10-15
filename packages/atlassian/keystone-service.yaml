@@ -1,0 +1,191 @@
+schema_version: 1
+kind: service
+name: atlassian
+version: 1.0.0
+publisher: keystone-codes
+summary: "Atlassian (Jira and Confluence) tools (mcp-atlassian 0.23.1) behind Keystone; each person, service or role uses its own account."
+homepage: https://github.com/keystone-codes/stdio-box/tree/atlassian/v1.0.0/packages/atlassian
+compat:
+  keystone_mcp: ">=0.5.0,<2.0"
+  contracts: [upstream-registry/1, identity-assertion/1]
+mcp:
+  container: mcp
+  transport: http
+  path: /mcp
+  healthz: /healthz
+  namespace: atlassian
+  bearer_env: BOX_BEARER_TOKEN
+  tools:
+    - jira_get_user_profile
+    - jira_search_assignable_users
+    - jira_get_issue_watchers
+    - jira_add_watcher
+    - jira_remove_watcher
+    - jira_get_issue
+    - jira_search
+    - jira_search_fields
+    - jira_get_field_options
+    - jira_get_project_issues
+    - jira_get_transitions
+    - jira_get_worklog
+    - jira_download_attachments
+    - jira_get_issue_images
+    - jira_get_agile_boards
+    - jira_get_board_issues
+    - jira_get_sprints_from_board
+    - jira_get_sprint_issues
+    - jira_get_link_types
+    - jira_create_issue
+    - jira_batch_create_issues
+    - jira_batch_get_changelogs
+    - jira_update_issue
+    - jira_assign_issue
+    - jira_delete_issue
+    - jira_move_issue
+    - jira_add_comment
+    - jira_edit_comment
+    - jira_add_worklog
+    - jira_link_to_epic
+    - jira_create_issue_link
+    - jira_create_remote_issue_link
+    - jira_remove_issue_link
+    - jira_transition_issue
+    - jira_create_sprint
+    - jira_update_sprint
+    - jira_add_issues_to_sprint
+    - jira_move_issues_to_backlog
+    - jira_get_project_issue_types
+    - jira_get_create_fields
+    - jira_get_project_versions
+    - jira_get_project_components
+    - jira_get_all_projects
+    - jira_search_projects
+    - jira_get_project_fields
+    - jira_get_service_desk_for_project
+    - jira_get_service_desk_queues
+    - jira_get_queue_issues
+    - jira_get_request_types
+    - jira_get_request_type_fields
+    - jira_create_customer_request
+    - jira_create_version
+    - jira_batch_create_versions
+    - jira_update_version
+    - jira_get_issue_proforma_forms
+    - jira_get_proforma_form_details
+    - jira_update_proforma_form_answers
+    - jira_get_issue_dates
+    - jira_get_issue_sla
+    - jira_get_issue_development_info
+    - jira_get_issues_development_info
+    - jira_get_project_epic_hierarchy
+    - jira_get_cross_project_dependencies
+    - confluence_search
+    - confluence_get_page
+    - confluence_get_page_children
+    - confluence_get_space_page_tree
+    - confluence_get_comments
+    - confluence_get_labels
+    - confluence_add_label
+    - confluence_create_page
+    - confluence_update_page
+    - confluence_update_page_section
+    - confluence_delete_page
+    - confluence_move_page
+    - confluence_add_comment
+    - confluence_reply_to_comment
+    - confluence_get_inline_comments
+    - confluence_add_inline_comment
+    - confluence_search_user
+    - confluence_get_page_history
+    - confluence_get_page_diff
+    - confluence_get_page_views
+    - confluence_upload_attachment
+    - confluence_upload_attachments
+    - confluence_get_attachments
+    - confluence_download_attachment
+    - confluence_download_content_attachments
+    - confluence_delete_attachment
+    - confluence_get_page_images
+    - confluence_list_page_templates
+    - confluence_get_page_template
+    - confluence_create_page_from_template
+    - confluence_get_page_restrictions
+    - confluence_set_page_restrictions
+    - confluence_copy_page
+    - confluence_check_content_permissions
+    - confluence_get_space_permissions
+    - creds_providers
+    - creds_profiles
+    - creds_bindings
+    - creds_profile_create
+    - creds_profile_rotate
+    - creds_profile_delete
+    - creds_bind
+    - creds_unbind
+    - creds_whoami
+    - creds_check
+  critical:
+    - jira_remove_watcher
+    - jira_update_issue
+    - jira_delete_issue
+    - jira_move_issue
+    - jira_edit_comment
+    - jira_add_worklog
+    - jira_link_to_epic
+    - jira_remove_issue_link
+    - jira_transition_issue
+    - jira_update_sprint
+    - jira_add_issues_to_sprint
+    - jira_create_customer_request
+    - jira_update_version
+    - jira_update_proforma_form_answers
+    - confluence_update_page
+    - confluence_update_page_section
+    - confluence_delete_page
+    - confluence_move_page
+    - confluence_add_inline_comment
+    - confluence_upload_attachment
+    - confluence_upload_attachments
+    - confluence_delete_attachment
+    - confluence_set_page_restrictions
+    - confluence_copy_page
+    - creds_profile_create
+    - creds_profile_rotate
+    - creds_profile_delete
+    - creds_bind
+    - creds_unbind
+identity:
+  signed_assertion: required
+  secret_env: BOX_IDENTITY_SECRET
+  audience_env: BOX_IDENTITY_AUDIENCE
+containers:
+  mcp:
+    # placeholder until the stdio-box image release records the digest
+    image: "ghcr.io/keystone-codes/stdio-box:0.1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    port: 8081
+    env:
+      - name: BOX_PROVIDER
+        default: "atlassian"
+        description: "Provider directory inside the stdio-box image."
+      - name: BOX_COMMAND
+        default: "uvx mcp-atlassian==0.23.1"
+        description: "Server to run. The package and version must match the provider lock file."
+    secrets:
+      - name: BOX_STORE_KEY
+        generate:
+          bytes: 32
+    volumes:
+      - name: store
+        path: /data
+      - name: cache
+        path: /cache
+    healthcheck:
+      path: /healthz
+      interval: 10s
+      start_period: 300s
+needs: []
+requires: []
+public_paths:
+  - /creds/
+public_base_url_env: BOX_PUBLIC_BASE_URL
+recommended_policy: policy.example.yaml
