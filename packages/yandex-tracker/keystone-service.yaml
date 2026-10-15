@@ -1,0 +1,166 @@
+schema_version: 1
+kind: service
+name: yandex-tracker
+version: 1.0.0
+publisher: keystone-codes
+summary: "Yandex Tracker tools (@fractalizer/mcp-server-yandex-tracker 5.1.0) behind Keystone; each person, service or role uses its own account."
+homepage: https://github.com/keystone-codes/stdio-box/tree/yandex-tracker/v1.0.0/packages/yandex-tracker
+compat:
+  keystone_mcp: ">=0.5.0,<2.0"
+  contracts: [upstream-registry/1, identity-assertion/1]
+mcp:
+  container: mcp
+  transport: http
+  path: /mcp
+  healthz: /healthz
+  namespace: yandex_tracker
+  bearer_env: BOX_BEARER_TOKEN
+  tools:
+    - fr_yandex_tracker_add_comment
+    - fr_yandex_tracker_create_issue
+    - fr_yandex_tracker_create_queue
+    - fr_yandex_tracker_find_issues
+    - fr_yandex_tracker_get_issues
+    - fr_yandex_tracker_get_users
+    - fr_yandex_tracker_manage_queue_access
+    - fr_yandex_tracker_ping
+    - fr_yandex_tracker_update_issue
+    - fr_yandex_tracker_update_queue
+    - fr_yandex_tracker_add_checklist_item
+    - fr_yandex_tracker_add_worklog
+    - fr_yandex_tracker_bulk_move_issues
+    - fr_yandex_tracker_bulk_transition_issues
+    - fr_yandex_tracker_bulk_update_issues
+    - fr_yandex_tracker_create_component
+    - fr_yandex_tracker_create_entity
+    - fr_yandex_tracker_create_link
+    - fr_yandex_tracker_delete_checklist_item
+    - fr_yandex_tracker_delete_comment
+    - fr_yandex_tracker_delete_link
+    - fr_yandex_tracker_delete_worklog
+    - fr_yandex_tracker_download_attachment
+    - fr_yandex_tracker_edit_comment
+    - fr_yandex_tracker_find_entities
+    - fr_yandex_tracker_find_users
+    - fr_yandex_tracker_get_attachments
+    - fr_yandex_tracker_get_board
+    - fr_yandex_tracker_get_boards
+    - fr_yandex_tracker_get_checklist
+    - fr_yandex_tracker_get_comments
+    - fr_yandex_tracker_get_components
+    - fr_yandex_tracker_get_entity
+    - fr_yandex_tracker_get_issue_changelog
+    - fr_yandex_tracker_get_issue_links
+    - fr_yandex_tracker_get_issue_transitions
+    - fr_yandex_tracker_get_queue
+    - fr_yandex_tracker_get_queues
+    - fr_yandex_tracker_get_sprint
+    - fr_yandex_tracker_get_sprints
+    - fr_yandex_tracker_get_worklogs
+    - fr_yandex_tracker_search_worklog
+    - fr_yandex_tracker_transition_issue
+    - fr_yandex_tracker_update_checklist_item
+    - fr_yandex_tracker_update_component
+    - fr_yandex_tracker_update_entity
+    - fr_yandex_tracker_update_worklog
+    - fr_yandex_tracker_upload_attachment
+    - fr_yandex_tracker_add_goal_key_result
+    - fr_yandex_tracker_analyze_issue_description
+    - fr_yandex_tracker_clear_goal_key_results
+    - fr_yandex_tracker_create_board
+    - fr_yandex_tracker_create_board_column
+    - fr_yandex_tracker_create_filter
+    - fr_yandex_tracker_create_global_field
+    - fr_yandex_tracker_create_queue_local_field
+    - fr_yandex_tracker_create_sprint
+    - fr_yandex_tracker_delete_attachment
+    - fr_yandex_tracker_delete_board
+    - fr_yandex_tracker_delete_board_column
+    - fr_yandex_tracker_delete_entity
+    - fr_yandex_tracker_get_board_columns
+    - fr_yandex_tracker_get_bulk_change_status
+    - fr_yandex_tracker_get_filters
+    - fr_yandex_tracker_get_global_field
+    - fr_yandex_tracker_get_global_fields
+    - fr_yandex_tracker_get_goal_key_results
+    - fr_yandex_tracker_get_issue_types
+    - fr_yandex_tracker_get_issue_urls
+    - fr_yandex_tracker_get_priorities
+    - fr_yandex_tracker_get_queue_fields
+    - fr_yandex_tracker_get_queue_local_fields
+    - fr_yandex_tracker_get_resolutions
+    - fr_yandex_tracker_get_statuses
+    - fr_yandex_tracker_get_thumbnail
+    - fr_yandex_tracker_manage_sprint_lifecycle
+    - fr_yandex_tracker_set_goal_key_results
+    - fr_yandex_tracker_update_board
+    - fr_yandex_tracker_update_board_column
+    - fr_yandex_tracker_update_filter
+    - fr_yandex_tracker_update_global_field
+    - fr_yandex_tracker_update_queue_local_field
+    - fr_yandex_tracker_update_sprint
+    - fr_yandex_tracker_demo
+    - fr_yandex_tracker_raw_api_request
+    - creds_providers
+    - creds_profiles
+    - creds_bindings
+    - creds_profile_create
+    - creds_profile_rotate
+    - creds_profile_delete
+    - creds_bind
+    - creds_unbind
+    - creds_whoami
+    - creds_check
+  critical:
+    - fr_yandex_tracker_manage_queue_access
+    - fr_yandex_tracker_delete_checklist_item
+    - fr_yandex_tracker_delete_comment
+    - fr_yandex_tracker_delete_link
+    - fr_yandex_tracker_delete_worklog
+    - fr_yandex_tracker_clear_goal_key_results
+    - fr_yandex_tracker_delete_attachment
+    - fr_yandex_tracker_delete_board
+    - fr_yandex_tracker_delete_board_column
+    - fr_yandex_tracker_delete_entity
+    - fr_yandex_tracker_manage_sprint_lifecycle
+    - fr_yandex_tracker_set_goal_key_results
+    - creds_profile_create
+    - creds_profile_rotate
+    - creds_profile_delete
+    - creds_bind
+    - creds_unbind
+identity:
+  signed_assertion: required
+  secret_env: BOX_IDENTITY_SECRET
+  audience_env: BOX_IDENTITY_AUDIENCE
+containers:
+  mcp:
+    # placeholder until the stdio-box image release records the digest
+    image: "ghcr.io/keystone-codes/stdio-box:0.1.0@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    port: 8081
+    env:
+      - name: BOX_PROVIDER
+        default: "yandex-tracker"
+        description: "Provider directory inside the stdio-box image."
+      - name: BOX_COMMAND
+        default: "npx -y @fractalizer/mcp-server-yandex-tracker@5.1.0"
+        description: "Server to run. The package and version must match the provider lock file."
+    secrets:
+      - name: BOX_STORE_KEY
+        generate:
+          bytes: 32
+    volumes:
+      - name: store
+        path: /data
+      - name: cache
+        path: /cache
+    healthcheck:
+      path: /healthz
+      interval: 10s
+      start_period: 300s
+needs: []
+requires: []
+public_paths:
+  - /creds/
+public_base_url_env: BOX_PUBLIC_BASE_URL
+recommended_policy: policy.example.yaml

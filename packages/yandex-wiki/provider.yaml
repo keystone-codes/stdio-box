@@ -1,0 +1,31 @@
+schema_version: 1
+name: yandex-wiki
+title: Yandex Wiki
+server:
+  command: "uvx ya-wiki-mcp==0.3.1"
+  bin: ya-wiki-mcp
+  lock: requirements.txt
+fields:
+  - {name: YA_WIKI_TOKEN, type: string, secret: true, hint: "OAuth token from oauth.yandex.ru with Wiki access"}
+  - {name: YA_WIKI_ORG_ID, type: string, secret: false, hint: "Organization ID. ya-wiki-mcp 0.3.1 sends it as a Yandex Cloud org."}
+variants:
+  - name: token
+    fields: [YA_WIKI_TOKEN, YA_WIKI_ORG_ID]
+    checks:
+      - http:
+          method: GET
+          url: "https://api.wiki.yandex.net/v1/users/me"
+          auth:
+            header: {name: Authorization, scheme: OAuth, field: YA_WIKI_TOKEN}
+          headers:
+            X-Cloud-Org-Id: "{YA_WIKI_ORG_ID}"
+          expect_status: [200]
+          identity: username
+tools:
+  normalize: none
+discovery:
+  mode: placeholder
+  env:
+    YA_WIKI_TOKEN: discovery-placeholder
+    YA_WIKI_ORG_ID: discovery-org
+identity_to_child: none

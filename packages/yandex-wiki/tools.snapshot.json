@@ -1,0 +1,2178 @@
+{
+  "schema_version": 1,
+  "server": {
+    "command": "uvx ya-wiki-mcp==0.3.1"
+  },
+  "taken_at": "2026-10-15T13:51:50Z",
+  "tools": [
+    {
+      "description": "Convert standard Markdown to YFM (Yandex Flavored Markdown) syntax.\n\nConverts: tables (to wiki-style #||#), callouts (to {% note %}),\n<details> (to {% cut %}), <u> (to ++underline++), <mark> (to ==highlight==),\n<sup>/<sub> (to ^super^/~sub~).\n\nUse this before create_page or update_page to ensure content renders correctly in Yandex Wiki.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "markdown": {
+            "description": "Standard Markdown text to convert",
+            "type": "string"
+          }
+        },
+        "required": [
+          "markdown"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "convert_md_to_yfm",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Convert Md To Yfm"
+    },
+    {
+      "description": "Get just the text content of a Yandex Wiki page (no metadata). Convenient for reading pages.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "page_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Page numeric ID (alternative to slug)"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Page slug, e.g. \"users/test/page\""
+          }
+        },
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "get_page_content",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Get Page Content"
+    },
+    {
+      "description": "Get a Yandex Wiki page by slug or ID.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Comma-separated additional fields: attributes, breadcrumbs, content, redirect. By default only id/slug/title are returned."
+          },
+          "page_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Page numeric ID (alternative to slug)"
+          },
+          "raise_on_redirect": {
+            "default": false,
+            "description": "Raise error if page has redirect",
+            "type": "boolean"
+          },
+          "revision_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Get specific revision"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Page slug, e.g. \"users/test/page\""
+          }
+        },
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "get_page",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Get Page"
+    },
+    {
+      "description": "Create a new Yandex Wiki page.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cloud_page": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "MS365 cloud page config. Examples:\n- Empty doc: {\"method\": \"empty_doc\", \"doctype\": \"docx\"}\n- From URL: {\"method\": \"from_url\", \"url\": \"https://...\"}"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Page body text"
+          },
+          "fields": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Response fields to include"
+          },
+          "grid_format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Text format for grid pages: yfm, wom, plain"
+          },
+          "is_silent": {
+            "default": false,
+            "description": "Silent mode (no notifications)",
+            "type": "boolean"
+          },
+          "page_type": {
+            "description": "One of: page, grid, cloud_page, wysiwyg, template",
+            "type": "string"
+          },
+          "slug": {
+            "description": "URL path, e.g. \"users/test/newpage\"",
+            "type": "string"
+          },
+          "title": {
+            "description": "Page title (1-255 chars)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "page_type",
+          "title",
+          "slug"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "create_page",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Create Page"
+    },
+    {
+      "description": "Update an existing Yandex Wiki page.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "allow_merge": {
+            "default": false,
+            "description": "Merge simultaneous edits via 3-way-merge",
+            "type": "boolean"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "New page content"
+          },
+          "fields": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Additional response fields"
+          },
+          "is_silent": {
+            "default": false,
+            "description": "Silent mode",
+            "type": "boolean"
+          },
+          "page_id": {
+            "description": "Page numeric ID",
+            "type": "integer"
+          },
+          "redirect": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Set redirect, e.g. {\"page\": {\"id\": 456}} or {\"page\": {\"slug\": \"path/to\"}}. Pass null to remove redirect."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "New title (1-255 chars)"
+          }
+        },
+        "required": [
+          "page_id"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "update_page",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Update Page"
+    },
+    {
+      "description": "Delete a Yandex Wiki page. Returns a recovery_token that can be used to restore it.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "page_id": {
+            "description": "Page numeric ID",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "page_id"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "delete_page",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Delete Page"
+    },
+    {
+      "description": "Clone a Yandex Wiki page to a new location. Returns operation status with status_url to track progress.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "page_id": {
+            "description": "Source page numeric ID",
+            "type": "integer"
+          },
+          "subscribe_me": {
+            "default": false,
+            "description": "Subscribe to changes on the cloned page",
+            "type": "boolean"
+          },
+          "target": {
+            "description": "Destination slug, e.g. \"users/test/copy\"",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "New title (1-255 chars)"
+          }
+        },
+        "required": [
+          "page_id",
+          "target"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "clone_page",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Clone Page"
+    },
+    {
+      "description": "Append content to an existing Yandex Wiki page. Use exactly one of: body_location, section_id, or anchor_name.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor_fallback": {
+            "default": false,
+            "description": "Enable fallback matching for anchor",
+            "type": "boolean"
+          },
+          "anchor_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Anchor reference point, e.g. \"#heading\""
+          },
+          "anchor_regex": {
+            "default": false,
+            "description": "Treat anchor as regex",
+            "type": "boolean"
+          },
+          "body_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "\"top\" or \"bottom\" \u2014 append to page body"
+          },
+          "content": {
+            "description": "Text to append (min 1 char)",
+            "type": "string"
+          },
+          "fields": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Additional response fields"
+          },
+          "is_silent": {
+            "default": false,
+            "description": "Silent mode",
+            "type": "boolean"
+          },
+          "page_id": {
+            "description": "Page numeric ID",
+            "type": "integer"
+          },
+          "section_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Target section ID (use with section_location)"
+          },
+          "section_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "\"top\" or \"bottom\" within section"
+          }
+        },
+        "required": [
+          "page_id",
+          "content"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "append_content",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Append Content"
+    },
+    {
+      "description": "Get all descendant pages (subpages at all levels) of a page by its ID. Returns paginated list of page IDs and slugs.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actuality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Filter by page status: \"active\" (default), \"removed\", or \"all\""
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Pagination cursor from previous response (next_cursor/prev_cursor)"
+          },
+          "include_self": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Include the parent page itself in results (default false)"
+          },
+          "page_id": {
+            "description": "Page numeric ID",
+            "type": "integer"
+          },
+          "page_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Results per page (default 20)"
+          }
+        },
+        "required": [
+          "page_id"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "get_descendants",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Get Descendants"
+    },
+    {
+      "description": "Get all descendant pages (subpages at all levels) of a page by its slug. Returns paginated list of page IDs and slugs.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "actuality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Filter by page status: \"active\" (default), \"removed\", or \"all\""
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Pagination cursor from previous response (next_cursor/prev_cursor)"
+          },
+          "include_self": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Include the parent page itself in results (default false)"
+          },
+          "page_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Results per page (default 20)"
+          },
+          "slug": {
+            "description": "Page slug, e.g. \"users/test/page\"",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "get_descendants_by_slug",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Get Descendants By Slug"
+    },
+    {
+      "description": "Get resources (attachments, grids, sharepoint docs) of a Yandex Wiki page. Supports pagination via cursor.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Pagination cursor from previous response (next_cursor/prev_cursor)"
+          },
+          "order_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Sort by \"name_title\" or \"created_at\""
+          },
+          "order_direction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "\"asc\" or \"desc\""
+          },
+          "page_id": {
+            "description": "Page numeric ID",
+            "type": "integer"
+          },
+          "page_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Results per page (1-50, default 25)"
+          },
+          "q": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Search by title (max 255 chars)"
+          },
+          "types": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Filter by type, comma-separated: attachment, sharepoint_resource, grid"
+          }
+        },
+        "required": [
+          "page_id"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "get_page_resources",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Get Page Resources"
+    },
+    {
+      "description": "Get grids (dynamic tables) attached to a Yandex Wiki page.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Pagination cursor"
+          },
+          "order_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Sort by \"title\" or \"created_at\""
+          },
+          "order_direction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "\"asc\" or \"desc\""
+          },
+          "page_id": {
+            "description": "Page numeric ID",
+            "type": "integer"
+          },
+          "page_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Results per page (1-50, default 25)"
+          }
+        },
+        "required": [
+          "page_id"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "get_page_grids",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Get Page Grids"
+    },
+    {
+      "description": "Create a new grid (dynamic table) on a Yandex Wiki page.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "page_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Parent page ID (takes priority over page_slug)"
+          },
+          "page_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Parent page slug (alternative to page_id)"
+          },
+          "title": {
+            "description": "Grid title (1-255 chars)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "create_grid",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Create Grid"
+    },
+    {
+      "description": "Get a grid (dynamic table) by ID with optional filtering and sorting.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Additional fields, comma-separated"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Row filter expression, e.g. \"[name] ~ wiki AND [age]>18\""
+          },
+          "grid_id": {
+            "description": "Grid UUID",
+            "type": "string"
+          },
+          "only_cols": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Return specific columns by slug, comma-separated"
+          },
+          "only_rows": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Return specific rows by ID, comma-separated"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Load specific grid version"
+          },
+          "sort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Sort rows, e.g. \"name, -age\" (prefix \"-\" for desc)"
+          }
+        },
+        "required": [
+          "grid_id"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "get_grid",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Get Grid"
+    },
+    {
+      "description": "Update grid title or default sort order. Returns new revision.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "default_sort": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Default sort config, e.g. [{\"column_slug\": \"asc\"}]"
+          },
+          "grid_id": {
+            "description": "Grid UUID",
+            "type": "string"
+          },
+          "revision": {
+            "description": "Current revision string (required for optimistic locking)",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "New title (1-255 chars)"
+          }
+        },
+        "required": [
+          "grid_id",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "update_grid",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Update Grid"
+    },
+    {
+      "description": "Delete a grid (dynamic table). This action cannot be undone.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "grid_id": {
+            "description": "Grid UUID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grid_id"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "delete_grid",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Delete Grid"
+    },
+    {
+      "description": "Add rows to a grid. Returns new revision and created row IDs.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "after_row_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Insert after this row ID"
+          },
+          "grid_id": {
+            "description": "Grid UUID",
+            "type": "string"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Insert at position (0-based)"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Current revision string"
+          },
+          "rows": {
+            "description": "List of row objects keyed by column slug, e.g. [{\"name\": \"Alice\", \"age\": 30}]",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "grid_id",
+          "rows"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "add_rows",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Add Rows"
+    },
+    {
+      "description": "Delete rows from a grid. Returns new revision.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "grid_id": {
+            "description": "Grid UUID",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Current revision string"
+          },
+          "row_ids": {
+            "description": "List of row IDs to delete",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "grid_id",
+          "row_ids"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "delete_rows",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Delete Rows"
+    },
+    {
+      "description": "Add columns to a grid. Returns new revision.\n\nEach column must have: \"title\" (str), \"type\" (str), \"slug\" (str), \"required\" (bool).\n\nColumn types: string, number, date, select, staff, checkbox, ticket, ticket_field.\nOptional fields: width (int), width_units (\"%\" or \"px\"), pinned (\"left\"/\"right\"),\ncolor (blue/yellow/pink/red/green/mint/grey/orange/magenta/purple/copper/ocean),\nmultiple (bool, for select/staff), format (\"yfm\"/\"wom\"/\"plain\", for string),\nselect_options (list[str], for select), mark_rows (bool, for checkbox), description (str).\n\nExample: [{\"title\": \"Name\", \"type\": \"string\", \"slug\": \"name\", \"required\": true}]",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "columns": {
+            "description": "List of column definitions (see above)",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "grid_id": {
+            "description": "Grid UUID",
+            "type": "string"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Insert at position (0-based)"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Current revision string"
+          }
+        },
+        "required": [
+          "grid_id",
+          "columns"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "add_columns",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Add Columns"
+    },
+    {
+      "description": "Delete columns from a grid. Returns new revision.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "column_slugs": {
+            "description": "List of column slugs to delete",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "grid_id": {
+            "description": "Grid UUID",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Current revision string"
+          }
+        },
+        "required": [
+          "grid_id",
+          "column_slugs"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "delete_columns",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Delete Columns"
+    },
+    {
+      "description": "Update cell values in a grid. Returns new revision and updated cells.\n\nEach cell: {\"row_id\": int, \"column_slug\": \"col\", \"value\": <any>}.\nValues can be: string, number, boolean, string[] (for select/multiple), or\nuser objects [{\"uid\": \"123\"}] (for staff columns).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cells": {
+            "description": "List of cell updates",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "grid_id": {
+            "description": "Grid UUID",
+            "type": "string"
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Current revision string"
+          }
+        },
+        "required": [
+          "grid_id",
+          "cells"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "update_cells",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Update Cells"
+    },
+    {
+      "description": "Move rows within a grid. Returns new revision.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "after_row_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Place after this row"
+          },
+          "grid_id": {
+            "description": "Grid UUID",
+            "type": "string"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Target position (0-based)"
+          },
+          "revision": {
+            "description": "Current revision string",
+            "type": "string"
+          },
+          "row_id": {
+            "description": "First row ID to move",
+            "type": "string"
+          },
+          "rows_count": {
+            "default": 1,
+            "description": "Number of consecutive rows to move (default 1)",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "grid_id",
+          "row_id",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "move_rows",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Move Rows"
+    },
+    {
+      "description": "Move columns within a grid. Returns new revision.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "column_slug": {
+            "description": "Column slug to move",
+            "type": "string"
+          },
+          "columns_count": {
+            "default": 1,
+            "description": "Number of consecutive columns to move (default 1)",
+            "type": "integer"
+          },
+          "grid_id": {
+            "description": "Grid UUID",
+            "type": "string"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Target position (0-based)"
+          },
+          "revision": {
+            "description": "Current revision string",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grid_id",
+          "column_slug",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "move_columns",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Move Columns"
+    },
+    {
+      "description": "Clone a grid to another page. Returns operation status with status_url to track progress.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "grid_id": {
+            "description": "Source grid UUID",
+            "type": "string"
+          },
+          "target": {
+            "description": "Destination page slug (creates page if needed)",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "New grid title (1-255 chars)"
+          },
+          "with_data": {
+            "default": false,
+            "description": "Copy row data too (default false, copies only structure)",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "grid_id",
+          "target"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "clone_grid",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Clone Grid"
+    },
+    {
+      "description": "Get the wiki page tree structure. Returns all known sections and their hierarchy.\n\nUse this before creating pages to find the best placement. The tree shows section titles, slugs, and nesting.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "use_cache": {
+            "default": true,
+            "description": "If true (default), return cached tree from local YAML. If false, fetch fresh tree from API (slower but up-to-date). Requires a root section in cache to know which slug to query.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "get_tree",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Get Tree"
+    },
+    {
+      "description": "Force refresh the entire wiki page tree cache from the API.\n\nFetches all descendant pages under root_slug, retrieves their titles, and rebuilds the tree cache.\nThis is slower than get_tree (makes N+1 API calls) but ensures the cache matches the real wiki.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "root_slug": {
+            "description": "Root page slug to start from, e.g. \"jummy\"",
+            "type": "string"
+          }
+        },
+        "required": [
+          "root_slug"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "refresh_tree_cache",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Refresh Tree Cache"
+    },
+    {
+      "description": "Clear the wiki page tree cache. The cache will be empty until refreshed or manually populated.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "clear_tree_cache",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Clear Tree Cache"
+    },
+    {
+      "description": "Suggest where to place a new page in the wiki tree based on its description.\n\nReturns a ranked list of existing sections that best match the content,\nplus a suggestion for creating a new section if none fit well.\nUse this to help the user decide where to put new documentation.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "Brief description of the page content to be placed",
+            "type": "string"
+          }
+        },
+        "required": [
+          "description"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "suggest_placement",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Suggest Placement"
+    },
+    {
+      "description": "Add a new section to the wiki page tree.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "parent_slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Parent section slug to nest under. If not provided, adds as root section."
+          },
+          "slug": {
+            "description": "Section slug (URL path), e.g. \"jummy/razrabotka/new-section\"",
+            "type": "string"
+          },
+          "title": {
+            "description": "Section display title, e.g. \"New Section\"",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "title"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "add_tree_section",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Add Tree Section"
+    },
+    {
+      "description": "Remove a section from the wiki page tree.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "slug": {
+            "description": "Section slug to remove",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "remove_tree_section",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Remove Tree Section"
+    },
+    {
+      "description": "Replace the entire wiki page tree from YAML. Use this to bulk-import the tree structure.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "tree_yaml": {
+            "description": "YAML string with tree structure. Format:\n- slug: root/section\n  title: Section Name\n  children:\n    - slug: root/section/child\n      title: Child Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tree_yaml"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "set_tree",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Set Tree"
+    },
+    {
+      "description": "List all saved Yandex Wiki prompt templates. These are reusable templates for creating wiki page content.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "prompts_list",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Prompts List"
+    },
+    {
+      "description": "Get and render a Yandex Wiki prompt template with arguments. Use for generating wiki page content from templates.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "arguments": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Key-value pairs for template substitution, e.g. {\"topic\": \"API docs\", \"date\": \"2026-03-05\"}"
+          },
+          "name": {
+            "description": "Prompt name (filename without .md)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "prompts_get",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Prompts Get"
+    },
+    {
+      "description": "Create or update a Yandex Wiki prompt template. Templates are used for generating wiki page content.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "arguments": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Optional list of arguments, each with \"name\", \"description\", and optionally \"required\" (bool).\nExample: [{\"name\": \"topic\", \"description\": \"Page topic\", \"required\": \"true\"}]"
+          },
+          "body": {
+            "description": "Prompt template text. Use {arg_name} for substitution placeholders.",
+            "type": "string"
+          },
+          "description": {
+            "description": "What this prompt does",
+            "type": "string"
+          },
+          "name": {
+            "description": "Prompt name (will be used as filename, no spaces)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "body"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "prompts_add",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Prompts Add"
+    },
+    {
+      "description": "Load a Yandex Wiki prompt template from an existing file. The file should have YAML frontmatter (---) with description and arguments, followed by the prompt body.\n\nIf the file has no frontmatter, it will be saved as-is with the filename as the prompt name.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "file_path": {
+            "description": "Absolute path to the .md file to load",
+            "type": "string"
+          },
+          "name": {
+            "description": "Prompt name to save as",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "file_path"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "prompts_add_from_file",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Prompts Add From File"
+    },
+    {
+      "description": "Delete a Yandex Wiki prompt template.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "description": "Prompt name to delete",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "meta": {
+        "fastmcp": {
+          "tags": []
+        }
+      },
+      "name": "prompts_remove",
+      "outputSchema": {
+        "properties": {
+          "result": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "result"
+        ],
+        "type": "object",
+        "x-fastmcp-wrap-result": true
+      },
+      "title": "Prompts Remove"
+    }
+  ]
+}

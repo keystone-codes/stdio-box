@@ -4,6 +4,9 @@
 
 ### Added
 
+- Package `tavily` 1.0.0 (tavily-mcp 0.2.22).
+- Package `yandex-tracker` 1.0.0 (@fractalizer/mcp-server-yandex-tracker 5.1.0).
+- Package `yandex-wiki` 1.0.0 (ya-wiki-mcp 0.3.1).
 - Package `atlassian` 1.0.0: Jira and Confluence (mcp-atlassian 0.23.1).
 - Ten `creds_*` tools, ordered role bindings with `position`, `creds_bindings`; `stdio-box policy-example`.
 - Package `notion` 1.0.0 (@notionhq/notion-mcp-server 2.5.2).
