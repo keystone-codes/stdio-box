@@ -26,6 +26,10 @@ Only the door calls the box. A person reaches it through an agent signed in at t
 | `BOX_ALLOWED_HOSTS` | empty | comma-separated host names |
 | `BOX_DEBUG` | unset | `1` enables `debug-spawn` |
 | `BOX_CHILD_ARGV_OVERRIDE` | unset | child program path, used only when `BOX_DEBUG=1` |
+| `BOX_ALLOW_HTTP_URLS` | `false` | `true` allows an `http` URL in a check |
+| `BOX_ALLOW_PRIVATE_URLS` | `false` | `true` allows a private, loopback, or link-local address |
+| `BOX_ALLOWED_URL_HOSTS` | empty | comma-separated host patterns (`fnmatch`) |
+| `BOX_FORM_TTL_SECONDS` | `900` | integer from 60 to 3600 |
 
 `BOX_DEBUG` and `BOX_CHILD_ARGV_OVERRIDE` are spawner settings. A missing value is not an error. `BOX_DEBUG=1` enables `debug-spawn`. Together with `BOX_CHILD_ARGV_OVERRIDE`, it names the child program and `launch` does not install.
 
@@ -360,6 +364,57 @@ The cache volume does not hold profiles. It does not need the same treatment.
 
 `credsctl store rekey --old-key-file <path>` (or `-` for stdin) opens every secret row with the old key and seals it with the current `BOX_STORE_KEY`. Rows already sealed with the current key are left as they are. If you no longer have the old key, enter the secrets again; the first successful write adopts the new key, and profiles you have not rewritten stay `needs_reentry`.
 
+## Entering secrets
+
+There are three ways to put an account into the box:
+
+1. A one-time form in the browser, at a link the administrator asked for.
+2. `credsctl profile import`, from a mode `0600` env file or from stdin.
+3. OAuth done by the person, in a later version. This version has no such flow.
+
+The form is not a login. A link that expires in 15 minutes and works once is enough: the person who opens it types the token, and the box checks that token with the provider before it stores anything. There is no other sign-in on the box.
+
+| Request | Response |
+|---|---|
+| `GET /creds/<token>` while the token is live | 200, an HTML form: provider and variant titles, profile id, non-secret fields read-only, `type=password autocomplete=off` inputs for the secret fields, a hidden `csrf`. Sets cookie `__Host-box_form=<nonce>; Secure; HttpOnly; SameSite=Strict; Path=/`. |
+| `GET` with an unknown, expired, or used token | 404, the same page: "This link is not valid. Ask the administrator for a new one." |
+| `POST /creds/<token>`, `application/x-www-form-urlencoded`, at most 16 KiB | Checks below. Success is 200: "Saved. \<title\> says this account is \<identity\>. You can close this page." |
+| `POST` when the provider rejects the values | 422, the same form, "\<title\> did not accept these values (HTTP \<code\>).", and one more attempt. The fifth failure is 410. |
+| `POST` when the provider cannot be reached | Values are stored, state `ready`, `last_check_ok` null. 200: "Saved, but \<title\> could not be reached to check them." |
+| Any other method | 405 |
+
+`POST` is accepted only in this order: the token is live, `Origin` is the origin of `BOX_PUBLIC_BASE_URL` (`Origin: null` is rejected), the cookie is present, `csrf` matches, the body contains only `csrf` and the variant's secret fields (each non-empty, within `max_length`, no line break), and the box has seen fewer than 60 such posts in the last minute. A failure before the provider check is 400, "The form could not be accepted. Open the link again." An unknown token is 404. The rate limit is 429.
+
+`GET` does not use the link up. A link is used up when the values are saved, or after five rejected attempts. One profile has one live link; a new link replaces the previous one. The lifetime is `BOX_FORM_TTL_SECONDS` (default 900, allowed 60–3600).
+
+Every `/creds/` response sends `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'`, `X-Frame-Options: DENY`, `Referrer-Policy: same-origin`, `Cache-Control: no-store`, and `X-Content-Type-Options: nosniff`. The page has no script and no external resources. `Referrer-Policy` is `same-origin`, not `no-referrer`: with `no-referrer` a browser sends `Origin: null` on the form post, and the origin check would reject every real submission.
+
+nginx in front of the box sets `Host` to `127.0.0.1` and passes the public name in `X-Forwarded-Host`. `/creds/` accepts `Host` `127.0.0.1`, `localhost`, or the host of `BOX_PUBLIC_BASE_URL`. If `X-Forwarded-Host` is present it must be that public host, otherwise the response is 421.
+
+When `BOX_PUBLIC_BASE_URL` is `https://public-domain-pending.invalid` (`--defer-public`), the form cannot be opened. Enter the account with `credsctl profile import` only.
+
+A check URL has to be `https` unless `BOX_ALLOW_HTTP_URLS=true`. Its host has to match the variant's `allowed_hosts` when that list is set, and `BOX_ALLOWED_URL_HOSTS` when that list is set. Every address the name resolves to has to be public: not loopback, not a private network, not link-local, not a unique-local IPv6 address, and not carrier-grade NAT. `BOX_ALLOW_PRIVATE_URLS=true` turns that address check off for a provider that lives on an internal network; set it only on purpose. The check connects to the address it just resolved and keeps the original name for `Host` and TLS.
+
+With `TLS=manual`, keystonectl's nginx does not write an access log for public paths, but your own proxy will record `/creds/<token>` unless you turn that log off for `/creds/`.
+
+```nginx
+location ^~ /creds/ {
+    access_log off;
+    proxy_pass http://127.0.0.1:8081;
+}
+```
+
+```caddy
+handle /creds/* {
+    log {
+        output discard
+    }
+    reverse_proxy 127.0.0.1:8081
+}
+```
+
+Rotation writes the new values only after the check is not a refusal. Until then the previous version stays as it was.
+
 ## credsctl
 
 `credsctl` is the operator CLI. In the container it runs as uid 10001. Started as root, it drops to that uid before it opens the database. Every command accepts `--json`. Field values are never printed. Each command that changes the store writes an audit row `event=admin`, `sub=cli:credsctl`.
@@ -378,7 +433,7 @@ credsctl audit [--since 24h] [--profile <id>] [--event <name>]
 credsctl status
 ```
 
-`profile import` reads an env file (`NAME=value`, blank lines and `#` comments skipped, quotes left as typed). The file must be mode `0600` unless the path is `-` (stdin). Without `--variant`, the variant is the one whose fields are exactly the non-empty provider fields in the file. A file that matches none (or more than one) is `variant_ambiguous`. Keys that are not provider fields are `unknown_fields` unless `--ignore-unknown` is set, in which case those names are skipped and listed as `ignored`. `--if-absent` on a profile that already exists exits 4 and writes nothing. Import does not bind the profile; bind is a separate command. `--no-check` skips the credential check. This build does not run the check either way: the result is `check: unreachable`, or `check: skipped` with `--no-check`.
+`profile import` reads an env file (`NAME=value`, blank lines and `#` comments skipped, quotes left as typed). The file must be mode `0600` unless the path is `-` (stdin). Without `--variant`, the variant is the one whose fields are exactly the non-empty provider fields in the file. A file that matches none (or more than one) is `variant_ambiguous`. Keys that are not provider fields are `unknown_fields` unless `--ignore-unknown` is set, in which case those names are skipped and listed as `ignored`. `--if-absent` on a profile that already exists exits 4 and writes nothing. Import does not bind the profile; bind is a separate command. Without `--no-check`, the variant's HTTP checks run before anything is written. A refusal exits 1 and leaves the store unchanged. If a check cannot be reached, the import still exits 0 (`check: unreachable`) and `last_check_ok` stays null. `--no-check` stores the values without a check (`check: skipped`, `last_check_ok` null).
 
 `bindings` prints `user`, then `role` with positions, then `default` — the same order a call is resolved in.
 
@@ -389,7 +444,7 @@ Exit codes:
 | Code | Meaning |
 |---|---|
 | 0 | Done. An import whose check could not reach the provider is still 0 (`check: unreachable`). |
-| 1 | The provider rejected the values. Reserved for the credential check. |
+| 1 | The provider rejected the values. Nothing was written. |
 | 2 | Usage. |
 | 3 | Invalid input: `unknown_fields`, `missing_fields`, `variant_ambiguous`, file mode, a bad id, subject, or position, `profile_in_use`, `binding_exists`. |
 | 4 | `--if-absent` and the profile already exists. |
