@@ -1,7 +1,7 @@
 """Credential checks declared on a provider variant.
 
-HTTP checks run in order. A tool check does not run here: it waits until
-credential tools can start an instance.
+HTTP checks run in order. A tool check starts a one-shot child through
+``instances.start_ephemeral``, calls the named tool, and stops that child.
 """
 
 import json
@@ -9,6 +9,7 @@ import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import timedelta
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -20,7 +21,7 @@ _FIELD = re.compile(r"\{([^{}]+)\}")
 _DEFAULT_TIMEOUT = 15.0
 _MAX_TIMEOUT = 30.0
 _IDENTITY_LIMIT = 120
-_TOOL_DETAIL = "tool checks arrive with creds tools"
+_NO_SLOT = "no free instance slot"
 
 
 @dataclass(frozen=True)
@@ -59,11 +60,11 @@ async def run_checks(
 ) -> CheckResult:
     """Run ``variant.checks`` in order.
 
-    ``instances`` is unused: a tool check reports that it is not available yet.
-    ``config`` supplies the URL flags; when it is omitted they are read from
-    the process environment.
+    ``instances`` is the instance manager. A tool check uses its
+    ``start_ephemeral`` method. Without that method, or with no free slot,
+    the check is ``ok=None``. ``config`` supplies the URL flags; when it is
+    omitted they are read from the process environment.
     """
-    del instances
     policy = url_policy_from_mapping({}) if config is None else config
     started = time.perf_counter()
     title = variant_title(variant)
@@ -73,7 +74,7 @@ async def run_checks(
     none_detail = ""
     results: list[dict[str, object]] = []
     for index, check in enumerate(variant.checks):
-        one = await _run_check(check, variant, fields, values, policy, title)
+        one = await _run_check(check, provider, variant, fields, values, policy, title, instances)
         results.append({"kind": one.kind, "ok": one.ok, "http_status": one.http_status})
         if index == 0:
             identity = one.identity
@@ -90,15 +91,57 @@ async def run_checks(
 
 async def _run_check(
     check: Check,
+    provider: Provider,
     variant: Variant,
     fields: Mapping[str, Field],
     values: Mapping[str, str],
     policy: UrlPolicy,
     title: str,
+    instances: object,
 ) -> _One:
     if check.kind == "tool" or check.http is None:
-        return _One("tool", None, None, None, _TOOL_DETAIL)
+        return await _run_tool(check, provider, variant, values, title, instances)
     return await _run_http(check.http, variant, fields, values, policy, title)
+
+
+async def _run_tool(
+    check: Check,
+    provider: Provider,
+    variant: Variant,
+    values: Mapping[str, str],
+    title: str,
+    instances: object,
+) -> _One:
+    tool = check.tool
+    start = getattr(instances, "start_ephemeral", None)
+    if tool is None or start is None:
+        return _One("tool", None, None, None, _NO_SLOT)
+    arguments = {} if tool.arguments is None else dict(tool.arguments)
+    timeout = _timeout(tool.timeout_seconds)
+    try:
+        async with start(provider, variant, values) as session:
+            if session is None:
+                return _One("tool", None, None, None, _NO_SLOT)
+            result = await session.call_tool(
+                tool.name,
+                arguments,
+                read_timeout_seconds=timedelta(seconds=timeout),
+            )
+    except Exception:
+        return _One("tool", None, None, None, _unreachable(title))
+    if result.isError:
+        return _One("tool", False, None, None, f"{title} did not accept these values.")
+    return _One("tool", True, None, _tool_identity(result), "")
+
+
+def _tool_identity(result: object) -> str | None:
+    structured = getattr(result, "structuredContent", None)
+    if not isinstance(structured, dict):
+        return None
+    value = structured.get("identity")
+    if isinstance(value, str) and value and len(value) <= _IDENTITY_LIMIT:
+        return value
+    return None
 
 
 async def _run_http(
