@@ -62,7 +62,7 @@ The snapshot's `server.command` must equal the provider's `server.command`. Publ
 
 `GET /healthz` does not check the bearer token. A request that carries `X-Forwarded-Host` (the door's proxy, from the public domain) gets the status code and `{}`. Any other request gets `status`, `store`, `isolation`, and `install`. `isolation` is the wrapper's current value: `unknown` until a child starts, then `per_slot_uid` or `shared_uid`. `install` is `unknown` until launch has installed a server; then it is `key`, `at`, `duration_ms`, and `from_cache`. A store schema newer than this process is HTTP 503. A key that does not match is HTTP 200 with `status` `degraded` and `store` `key_mismatch`.
 
-A call of a provider tool is routed to one profile, described under [How a call is routed](#how-a-call-is-routed). `creds_providers` describes the loaded provider. `creds_whoami` reports which profile this caller would use and does not refuse. The other `creds_*` tools answer `not_available` in this build. `isolation` and `server.installed_key` are `"unknown"` until those checks report.
+A call of a provider tool is routed to one profile, described under [How a call is routed](#how-a-call-is-routed). `creds_providers` describes the loaded provider. `creds_whoami` reports which profile this caller would use and does not refuse. The other `creds_*` tools are the account tools under [Box tools](#box-tools). `isolation` and `server.installed_key` are `"unknown"` until those checks report.
 
 ## How a call is routed
 
@@ -550,13 +550,13 @@ docker compose exec -T <service> credsctl bind default atlassian/shared
 
 ## Releasing
 
-`IMAGE` in the repository root is the pinned reference `ghcr.io/keystone-codes/stdio-box:<version>@sha256:<digest>`. Until the first release it has no digest line.
+`IMAGE` in the repository root is the pinned reference `ghcr.io/keystone-codes/stdio-box:<version>@sha256:<digest>`. Until the first release it has no digest line. Package manifests pin that same reference on `containers.mcp.image`. A package that is not part of the release keeps its own image.
 
 1. Run the `Release image` workflow (`workflow_dispatch`) with a version that matches `pyproject.toml`. The workflow tests, builds `linux/amd64` and `linux/arm64`, and pushes `ghcr.io/keystone-codes/stdio-box:<version>` with provenance and an SBOM.
-2. It opens a pull request that writes the digest reference into `IMAGE`.
-3. Merging that pull request to `main` runs `Tag release`, which checks the registry digest against `IMAGE`, tags `v<version>`, and publishes a GitHub release.
+2. It runs `scripts/pin_digest.py` with that image reference and opens a pull request. The pull request writes the reference into `IMAGE` and into `containers.mcp.image` of each package whose image is still the zero digest or a previous `stdio-box` release. The description lists those packages and their versions.
+3. Merging that pull request to `main` runs `Tag release`. It checks the registry digest against `IMAGE`, tags `v<version>`, and for each manifest whose `image` equals `IMAGE` tags `<name>/v<version>` when that tag does not exist yet. An existing package tag is left where it is. The same package version with different contents fails the workflow, because a tag is immutable. The GitHub release records the image digest and the package tags.
 
-Package manifests pin the same digest in a later change. Package tags use `<name>/v<version>`.
+The next change to a provider is a new image version and a new patch version of that package.
 
 ## Development
 

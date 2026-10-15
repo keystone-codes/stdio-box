@@ -18,6 +18,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Read IMAGE
         id: image
@@ -35,23 +36,13 @@ jobs:
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
-
-      - name: Skip if tag exists
-        id: check
-        if: steps.image.outputs.skip == 'false'
-        run: |
-          v="${{ steps.image.outputs.version }}"
-          if git rev-parse "v$v" >/dev/null 2>&1; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
-        if: steps.image.outputs.skip == 'false' && steps.check.outputs.skip == 'false'
+        if: steps.image.outputs.skip == 'false'
 
       - name: Verify registry digest
-        if: steps.image.outputs.skip == 'false' && steps.check.outputs.skip == 'false'
+        if: steps.image.outputs.skip == 'false'
         run: |
           set -euo pipefail
           v="${{ steps.image.outputs.version }}"
@@ -62,12 +53,79 @@ jobs:
             exit 1
           fi
 
-      - name: Create tag and release
-        if: steps.image.outputs.skip == 'false' && steps.check.outputs.skip == 'false'
+      - name: Create tags and release
+        if: steps.image.outputs.skip == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           v="${{ steps.image.outputs.version }}"
-          git tag "v$v"
-          git push origin "v$v"
-          gh release create "v$v" --generate-notes --notes "Image digest: \`${{ steps.image.outputs.digest }}\`"
+          ref="${{ steps.image.outputs.ref }}"
+          digest="${{ steps.image.outputs.digest }}"
+          head=$(git rev-parse HEAD)
+          to_create=()
+          package_tags=()
+
+          if git rev-parse -q --verify "refs/tags/v${v}" >/dev/null; then
+            existing=$(git rev-parse "v${v}^{commit}")
+            if [ "$existing" != "$head" ]; then
+              echo "tag v${v} already exists at ${existing}, not ${head}"
+              exit 1
+            fi
+          else
+            to_create+=("v${v}")
+          fi
+
+          shopt -s nullglob
+          for manifest in packages/*/keystone-service.yaml; do
+            dir=$(basename "$(dirname "$manifest")")
+            mapfile -t image_vals < <(sed -n 's/^[[:space:]]*image:[[:space:]]*"\{0,1\}\([^"[:space:]]*\)"\{0,1\}.*/\1/p' "$manifest")
+            if [ "${#image_vals[@]}" -ne 1 ]; then
+              echo "expected exactly one image line in ${manifest}, found ${#image_vals[@]}"
+              exit 1
+            fi
+            if [ "${image_vals[0]}" != "$ref" ]; then
+              continue
+            fi
+            mapfile -t pkg_names < <(sed -n 's/^name:[[:space:]]*"\{0,1\}\([A-Za-z0-9._-]*\)"\{0,1\}.*/\1/p' "$manifest")
+            mapfile -t pkg_versions < <(sed -n 's/^version:[[:space:]]*"\{0,1\}\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)"\{0,1\}.*/\1/p' "$manifest")
+            if [ "${#pkg_names[@]}" -ne 1 ] || [ "${#pkg_versions[@]}" -ne 1 ] || [ "${pkg_names[0]}" != "$dir" ]; then
+              echo "manifest name or version does not match ${manifest}"
+              exit 1
+            fi
+            pkg_name="${pkg_names[0]}"
+            pkg_version="${pkg_versions[0]}"
+            tag="${pkg_name}/v${pkg_version}"
+            git check-ref-format "refs/tags/${tag}"
+            if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+              if ! git diff --quiet "${tag}" HEAD -- "packages/${dir}"; then
+                echo "package tag ${tag} already exists and packages/${dir} differs; refusing to move it"
+                exit 1
+              fi
+            else
+              to_create+=("${tag}")
+            fi
+            package_tags+=("${tag}")
+          done
+
+          if [ "${#to_create[@]}" -gt 0 ]; then
+            refspecs=()
+            for tag in "${to_create[@]}"; do
+              git tag "${tag}"
+              refspecs+=("refs/tags/${tag}")
+            done
+            git push origin "${refspecs[@]}"
+          fi
+
+          notes="Image digest: \`${digest}\`"
+          notes+=$'\n\nPackage tags:\n'
+          if [ "${#package_tags[@]}" -eq 0 ]; then
+            notes+=$'- (none)\n'
+          else
+            for tag in "${package_tags[@]}"; do
+              notes+="- \`${tag}\`"$'\n'
+            done
+          fi
+          if ! gh release view "v${v}" >/dev/null 2>&1; then
+            gh release create "v${v}" --generate-notes --notes "$notes"
+          fi
