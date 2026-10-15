@@ -26,7 +26,7 @@ PID 1  tini                                 (root; reaps orphaned children)
          child  uid 20000+slot              (one profile's server; HOME=/tmp/box/slot-N)
 ```
 
-`stdio-box launch` is the process the image starts. The install step, the spawner, and the HTTP wrapper are filled in by later changes; this revision of `launch` reports that it is not implemented yet.
+`stdio-box launch` is the process the image starts. It fixes the directory owners, calls the provider install step, then splits into the root spawner and the wrapper. Until the install step is filled in, `launch` exits with code 2 and `provider install is not implemented yet`, unless `BOX_DEBUG=1` and `BOX_CHILD_ARGV_OVERRIDE` name a program to run as the child.
 
 | Path | Owner | Mode | Use |
 |---|---|---|---|
@@ -183,9 +183,34 @@ Who may call a tool is decided by the door's policy. The box keeps no role list 
 
 The signed identity assertion is forwarded to the child only when the provider sets `identity_to_child: meta`. The default is `none`.
 
-A secret field cannot be passed as a command-line argument. Credential values travel in the child's environment. The process layout above is what keeps one profile's child from reading another's environment, the store under `/data`, or the installer-owned files under `/cache`. The spawner, the per-slot uid, and the process limit are part of that layout and are wired up with `launch`.
+A secret field cannot be passed as a command-line argument. Credential values travel in the child's environment, and only in the explicit list the wrapper builds for that profile. The child never receives the wrapper's environment.
 
-Children share the container's network. Holding another package's bearer is what would let them call that package; the network path itself is open, including to addresses outside the host.
+```
+PID 1  tini                                 (root; reaps orphaned children)
+ └─ stdio-box launch                        (root, short-lived)
+     ├─ spawner                             (root; spawn, signal, and reap over a socketpair)
+     └─ wrapper  uid 10001, non-dumpable    (HTTP :8081 — /mcp, /creds/, /healthz)
+          ↕ stdin/stdout/stderr passed across by the spawner
+         child  uid 20000+slot              (one profile's server; HOME=/tmp/box/slot-N)
+```
+
+The wrapper calls `prctl(PR_SET_DUMPABLE, 0)` as soon as it starts, so `/proc/<wrapper>/environ` is not readable by another process of uid 10001. After `exec`, a child is dumpable again; what protects the next profile is that the child runs as `20000 + slot`, not as the wrapper.
+
+A child can see its own profile values, its slot directory `/tmp/box/slot-N` (mode `0700`), and the server code under `/cache` (readable and executable, not writable). It cannot see the store key, the database under `/data` (mode `0700`, owner 10001), or another profile's environment. It cannot change the code a later profile's child will run: `/cache` is owned by uid 10002, and the spawner never runs a child as that user.
+
+The spawner is the only process that stays root. It does not listen on the network and does not read `/data`. The wrapper asks it to spawn, signal, and reap over the socketpair inherited across `exec`. There is no control socket on the filesystem.
+
+`keystonectl` sets `security_opt: no-new-privileges:true` and does not set `user:` or drop capabilities. `no-new-privileges` does not block this layout: root drops uid with `setuid`, not with a setuid binary.
+
+If an override sets `user:` (the process is not root) or drops `SETUID`/`SETGID`, the box keeps running in `shared_uid` mode and does not start the root spawner. Children then share the wrapper's uid, the log contains `child_isolation_unavailable` once, and `isolation` is `shared_uid`. Dropping those capabilities leaves the process root, because it can no longer call `setuid` to become uid 10001 either. In that mode a uid-wide reap would kill the wrapper, so cleanup is only `killpg` of the child's process group and recreating `/tmp/box/slot-N`. A descendant that called `setsid` can outlive that.
+
+Slot numbers are reused, and with them the uid `20000 + slot`. Before every spawn into a slot, and after every stop, the spawner reaps that uid: a helper process setuid to the slot sends `SIGKILL` to every process it can see (this container's PID namespace), then deletes that uid's entries at the top of `/tmp` and `/dev/shm` without following symlinks, and recreates the slot directory. If processes remain after 5 seconds the slot is quarantined until the container restarts and is not handed out again.
+
+Each child sets `RLIMIT_NPROC` to 512 and `RLIMIT_CORE` to 0 before `exec`. Core dumps would contain tokens. There is no address-space limit: `RLIMIT_AS` breaks Node; an operator can set the container memory limit with an override. Without user namespaces the process count is per uid on the whole host, so two boxes on one machine share the 512 processes of a slot with the same number.
+
+Child stderr is logged at info as `stdio_box.child.stderr` with `profile`, `generation`, and `slot`. Lines are masked before they are written: every profile field value of 6 characters or more becomes `***`, then well-known token shapes (GitHub, GitLab, Slack, cloud keys, Atlassian, Notion, Yandex OAuth, Tavily). Lines longer than 2000 characters are cut. A token bucket keeps 50 lines per second with a burst of 200; the rest increment `stderr_suppressed_total` and, once a second, produce a warning `suppressed N stderr line(s)`.
+
+Children share the container network. Third-party code can open connections to other packages' facades on the `keystone-mcp-upstreams` network and to addresses outside the host. Those facades still require their own bearer; the network path itself is open.
 
 ## Releasing
 
