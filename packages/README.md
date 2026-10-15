@@ -26,4 +26,4 @@ npm install --package-lock-only
 
 `tools.snapshot.json` comes from `keystonectl package wrap-stdio`, which runs `stdio-box snapshot-tools` in the image.
 
-Names for this release, without a `-box` suffix: `atlassian` (Jira and Confluence), `notion`, `tavily`, `yandex-tracker`, `yandex-wiki`. Those directories are added by later changes. The echo server and the atlassian descriptor used by tests live under `tests/data/packages/`.
+Names for this release, without a `-box` suffix: `atlassian` (Jira and Confluence), `notion`, `tavily`, `yandex-tracker`, `yandex-wiki`. `packages/atlassian` is the Atlassian package. The other directories are added by later changes. The echo server and the atlassian descriptor used by tests live under `tests/data/packages/`.
