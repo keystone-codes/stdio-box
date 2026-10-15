@@ -29,11 +29,13 @@ def test_validate_provider_exit_codes(tmp_path: Path, capsys: pytest.CaptureFixt
     assert "name: must equal directory name 'echo'" in captured.out
 
 
-def test_launch_is_a_stub(capsys: pytest.CaptureFixture[str]) -> None:
+def test_launch_reports_install_is_not_implemented(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     with pytest.raises(SystemExit) as exc:
         main(["launch"])
     assert exc.value.code == 2
-    assert capsys.readouterr().err.strip() == "launch is not implemented yet"
+    assert "provider install is not implemented yet" in capsys.readouterr().err
 
 
 def test_credsctl_prints_usage(capsys: pytest.CaptureFixture[str]) -> None:
