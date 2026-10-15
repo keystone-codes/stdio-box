@@ -1,0 +1,114 @@
+schema_version: 1
+name: atlassian
+title: Atlassian (Jira and Confluence)
+server:
+  command: "uvx mcp-atlassian==0.23.1"
+  bin: mcp-atlassian
+  lock: requirements.txt
+  static_env:
+    READ_ONLY_MODE: "false"
+fields:
+  - {name: JIRA_URL, type: url, secret: false, hint: "Jira address, for example https://example.atlassian.net"}
+  - {name: JIRA_USERNAME, type: string, secret: false, hint: "Account email (Atlassian Cloud)"}
+  - {name: JIRA_API_TOKEN, type: string, secret: true, hint: "API token from id.atlassian.com, Security, API tokens"}
+  - {name: JIRA_PERSONAL_TOKEN, type: string, secret: true, hint: "Personal access token (Jira Server or Data Center)"}
+  - {name: CONFLUENCE_URL, type: url, secret: false, hint: "Confluence address, for example https://example.atlassian.net/wiki"}
+  - {name: CONFLUENCE_USERNAME, type: string, secret: false, hint: "Account email (Atlassian Cloud)"}
+  - {name: CONFLUENCE_API_TOKEN, type: string, secret: true, hint: "API token from id.atlassian.com (the same token works for Jira)"}
+  - {name: CONFLUENCE_PERSONAL_TOKEN, type: string, secret: true, hint: "Personal access token (Confluence Server or Data Center)"}
+variants:
+  - name: cloud
+    title: Jira and Confluence, Atlassian Cloud
+    fields: [JIRA_URL, JIRA_USERNAME, JIRA_API_TOKEN, CONFLUENCE_URL, CONFLUENCE_USERNAME, CONFLUENCE_API_TOKEN]
+    allowed_hosts: ["*.atlassian.net"]
+    checks:
+      - http:
+          method: GET
+          url: "{JIRA_URL}/rest/api/2/myself"
+          auth:
+            basic: [JIRA_USERNAME, JIRA_API_TOKEN]
+          expect_status: [200]
+          identity: displayName
+      - http:
+          method: GET
+          url: "{CONFLUENCE_URL}/rest/api/user/current"
+          auth:
+            basic: [CONFLUENCE_USERNAME, CONFLUENCE_API_TOKEN]
+          expect_status: [200]
+          identity: displayName
+  - name: jira_cloud
+    fields: [JIRA_URL, JIRA_USERNAME, JIRA_API_TOKEN]
+    tools: ["jira_*"]
+    allowed_hosts: ["*.atlassian.net"]
+    checks:
+      - http:
+          method: GET
+          url: "{JIRA_URL}/rest/api/2/myself"
+          auth:
+            basic: [JIRA_USERNAME, JIRA_API_TOKEN]
+          expect_status: [200]
+          identity: displayName
+  - name: confluence_cloud
+    fields: [CONFLUENCE_URL, CONFLUENCE_USERNAME, CONFLUENCE_API_TOKEN]
+    tools: ["confluence_*"]
+    allowed_hosts: ["*.atlassian.net"]
+    checks:
+      - http:
+          method: GET
+          url: "{CONFLUENCE_URL}/rest/api/user/current"
+          auth:
+            basic: [CONFLUENCE_USERNAME, CONFLUENCE_API_TOKEN]
+          expect_status: [200]
+          identity: displayName
+  - name: server
+    title: Jira and Confluence, Server or Data Center
+    fields: [JIRA_URL, JIRA_PERSONAL_TOKEN, CONFLUENCE_URL, CONFLUENCE_PERSONAL_TOKEN]
+    checks:
+      - http:
+          method: GET
+          url: "{JIRA_URL}/rest/api/2/myself"
+          auth:
+            bearer: JIRA_PERSONAL_TOKEN
+          expect_status: [200]
+          identity: displayName
+      - http:
+          method: GET
+          url: "{CONFLUENCE_URL}/rest/api/user/current"
+          auth:
+            bearer: CONFLUENCE_PERSONAL_TOKEN
+          expect_status: [200]
+          identity: displayName
+  - name: jira_server
+    fields: [JIRA_URL, JIRA_PERSONAL_TOKEN]
+    tools: ["jira_*"]
+    checks:
+      - http:
+          method: GET
+          url: "{JIRA_URL}/rest/api/2/myself"
+          auth:
+            bearer: JIRA_PERSONAL_TOKEN
+          expect_status: [200]
+          identity: displayName
+  - name: confluence_server
+    fields: [CONFLUENCE_URL, CONFLUENCE_PERSONAL_TOKEN]
+    tools: ["confluence_*"]
+    checks:
+      - http:
+          method: GET
+          url: "{CONFLUENCE_URL}/rest/api/user/current"
+          auth:
+            bearer: CONFLUENCE_PERSONAL_TOKEN
+          expect_status: [200]
+          identity: displayName
+tools:
+  normalize: none
+discovery:
+  mode: placeholder
+  env:
+    JIRA_URL: https://discovery.invalid
+    JIRA_USERNAME: discovery@example.invalid
+    JIRA_API_TOKEN: discovery-placeholder
+    CONFLUENCE_URL: https://discovery.invalid/wiki
+    CONFLUENCE_USERNAME: discovery@example.invalid
+    CONFLUENCE_API_TOKEN: discovery-placeholder
+identity_to_child: none
