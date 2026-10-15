@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "dependencies": {
+    "@fractalizer/mcp-server-yandex-tracker": "5.1.0"
+  }
+}

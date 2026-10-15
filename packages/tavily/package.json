@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "dependencies": {
+    "tavily-mcp": "0.2.22"
+  }
+}
