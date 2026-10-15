@@ -102,3 +102,4 @@ requires: []
 public_paths:
   - /creds/
 public_base_url_env: BOX_PUBLIC_BASE_URL
+recommended_policy: policy.example.yaml

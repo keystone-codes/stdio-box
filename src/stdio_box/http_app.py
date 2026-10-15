@@ -93,6 +93,7 @@ def build_app(
     whoami: Callable[[KeystoneIdentity], Awaitable[types.CallToolResult]] | None = None,
     background: Callable[[], AbstractAsyncContextManager[None]] | None = None,
     form_stats: object | None = None,
+    creds: object | None = None,
 ) -> Starlette:
     """Starlette app for ``/mcp``, ``/healthz``, and ``/creds/{token}`` without a bearer.
 
@@ -100,10 +101,11 @@ def build_app(
     is open. ``background`` is an async context manager factory (the instance
     manager) started for the life of the process. ``form_stats``, when that
     manager is running, receives form issue and submit counts for its status
-    snapshot and ``reset_failed`` after a saved rotation.
+    snapshot and ``reset_failed`` after a saved rotation. ``creds`` is the
+    store and instance manager used by the ``creds_*`` handlers.
     """
     replay_cache = ReplayCache()
-    server = _build_server(config, provider, catalog, forwarder, replay_cache, whoami)
+    server = _build_server(config, provider, catalog, forwarder, replay_cache, whoami, creds)
     sessions = StreamableHTTPSessionManager(app=server, stateless=True, json_response=True)
 
     class _McpEndpoint:
@@ -145,6 +147,7 @@ def _build_server(
     forwarder: Forwarder,
     replay_cache: ReplayCache,
     whoami: Callable[[KeystoneIdentity], Awaitable[types.CallToolResult]] | None,
+    creds: object | None,
 ) -> Server:
     server: Server = Server("stdio-box", version=__version__)
     if not hasattr(server, "list_tools"):
@@ -171,7 +174,7 @@ def _build_server(
             return await whoami(identity)
         handler = handler_for(name)
         if handler is not None:
-            return await handler(provider, identity, arguments)
+            return await handler(provider, identity, arguments, creds)
         child = catalog.child_name(name)
         if child is not None:
             token = headers.get("x-keystone-identity")
