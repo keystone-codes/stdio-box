@@ -4,16 +4,21 @@ import io
 import json
 import os
 import secrets
+import socket
 import sqlite3
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
+import respx
 
 from stdio_box.cli import credsctl_main
 from stdio_box.store.repo import Store
 
 PROVIDER_DIR = Path(__file__).resolve().parent / "data" / "packages" / "atlassian"
+ECHO_HTTP = Path(__file__).resolve().parent / "data" / "packages" / "echo-http"
+REJECTED = "rejected-token-value"
 TOKEN = "test-token-value"
 QUOTED = '"quoted-token"'
 
@@ -76,7 +81,8 @@ def test_import_from_stdin_and_from_a_mode_600_file(
 ) -> None:
     monkeypatch.setattr(sys, "stdin", io.StringIO(_jira_cloud()))
     code, out, err = _invoke(
-        ["profile", "import", "atlassian/stdin", "--from-file", "-", "--json"], capsys
+        ["profile", "import", "atlassian/stdin", "--from-file", "-", "--no-check", "--json"],
+        capsys,
     )
     assert code == 0
     assert err == ""
@@ -84,13 +90,14 @@ def test_import_from_stdin_and_from_a_mode_600_file(
     assert payload["ok"] is True
     assert payload["code"] == 0
     assert payload["result"]["variant"] == "jira_cloud"
-    assert payload["result"]["check"] == "unreachable"
+    assert payload["result"]["check"] == "skipped"
     assert TOKEN not in out and TOKEN not in err
 
     path = box.parent / "jira.env"
     _write_env(path, _cloud())
     code, out, err = _invoke(
-        ["profile", "import", "atlassian/both", "--from-file", str(path), "--json"], capsys
+        ["profile", "import", "atlassian/both", "--from-file", str(path), "--no-check", "--json"],
+        capsys,
     )
     assert code == 0
     assert _json(out)["result"]["variant"] == "cloud"
@@ -100,7 +107,15 @@ def test_import_from_stdin_and_from_a_mode_600_file(
     server_path = box.parent / "server.env"
     _write_env(server_path, server)
     code, out, _err = _invoke(
-        ["profile", "import", "atlassian/server", "--from-file", str(server_path), "--json"],
+        [
+            "profile",
+            "import",
+            "atlassian/server",
+            "--from-file",
+            str(server_path),
+            "--no-check",
+            "--json",
+        ],
         capsys,
     )
     assert _json(out)["result"]["variant"] == "jira_server"
@@ -174,6 +189,7 @@ def test_variant_ambiguous_unknown_fields_and_if_absent(
             "--from-file",
             str(unknown),
             "--ignore-unknown",
+            "--no-check",
             "--json",
         ],
         capsys,
@@ -247,7 +263,8 @@ def test_bind_position_and_bindings_json_order(
     path = box.parent / "jira.env"
     _write_env(path, _jira_cloud())
     code, _out, _err = _invoke(
-        ["profile", "import", "atlassian/shared", "--from-file", str(path), "--json"], capsys
+        ["profile", "import", "atlassian/shared", "--from-file", str(path), "--no-check", "--json"],
+        capsys,
     )
     assert code == 0
     for subject in ("role:a", "role:b", "role:c"):
@@ -299,3 +316,72 @@ def test_root_drops_privileges_before_opening_the_store(
     code, _out, _err = _invoke(["store", "status", "--json"], capsys)
     assert code == 0
     assert calls == [("setgroups", ()), ("setgid", 10001), ("setuid", 10001)]
+
+
+def _echo_env(path: Path) -> None:
+    _write_env(
+        path,
+        f"ECHO_URL=https://echo.example\nECHO_TOKEN={REJECTED}\nECHO_ORG=acme\n",
+    )
+
+
+def _public_dns(_host, _port, *_args, **_kwargs):
+    return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 0))]
+
+
+def test_import_rejected_token_writes_nothing(
+    box: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("BOX_PROVIDER", "echo-http")
+    monkeypatch.setenv("BOX_PROVIDER_DIR", str(ECHO_HTTP))
+    monkeypatch.setattr(socket, "getaddrinfo", _public_dns)
+    path = box.parent / "echo.env"
+    _echo_env(path)
+    with respx.mock(assert_all_called=False) as mock:
+        mock.route().mock(return_value=httpx.Response(401))
+        code, out, err = _invoke(
+            ["profile", "import", "echo-http/main", "--from-file", str(path), "--json"],
+            capsys,
+        )
+    assert code == 1
+    payload = _json(out)
+    assert payload["error"]["id"] == "check_failed"
+    assert "did not accept these values (HTTP 401)" in payload["error"]["message"]
+    assert REJECTED not in out and REJECTED not in err
+    store = Store.open(box, os.environ["BOX_STORE_KEY"], field_names=["ECHO_TOKEN"])
+    assert store.get_profile("echo-http/main") is None
+    store.close()
+
+
+def test_import_no_check_writes_without_a_check(
+    box: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("BOX_PROVIDER", "echo-http")
+    monkeypatch.setenv("BOX_PROVIDER_DIR", str(ECHO_HTTP))
+    path = box.parent / "echo.env"
+    _echo_env(path)
+    with respx.mock(assert_all_called=False) as mock:
+        mock.route().mock(return_value=httpx.Response(401))
+        code, out, err = _invoke(
+            [
+                "profile",
+                "import",
+                "echo-http/main",
+                "--from-file",
+                str(path),
+                "--no-check",
+                "--json",
+            ],
+            capsys,
+        )
+        assert mock.calls.call_count == 0
+    assert code == 0
+    assert err == ""
+    assert _json(out)["result"]["check"] == "skipped"
+    assert REJECTED not in out
+    store = Store.open(box, os.environ["BOX_STORE_KEY"])
+    profile = store.get_profile("echo-http/main")
+    assert profile is not None
+    assert profile.last_check_ok is None
+    assert store.read_secrets("echo-http/main") == {"ECHO_TOKEN": REJECTED}
+    store.close()

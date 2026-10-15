@@ -104,7 +104,7 @@ def serve_http(spawner: object | None = None, installed: InstalledServer | None 
         print(str(exc), file=sys.stderr)
         raise SystemExit(1) from exc
     store, schema_newer = _open_store(config, provider)
-    forwarder, whoami, background = _routing(
+    forwarder, whoami, background, form_stats = _routing(
         config, provider, catalog, snapshot, store, spawner, installed
     )
     app = build_app(
@@ -116,6 +116,7 @@ def serve_http(spawner: object | None = None, installed: InstalledServer | None 
         schema_newer=schema_newer,
         whoami=whoami,
         background=background,
+        form_stats=form_stats,
     )
     try:
         uvicorn.run(app, host="0.0.0.0", port=config.port)
@@ -132,10 +133,10 @@ def _routing(
     store: Store | None,
     spawner: object | None,
     installed: InstalledServer | None,
-) -> tuple[Forwarder, object, object]:
+) -> tuple[Forwarder, object, object, object | None]:
     """Build the call forwarder. A store that did not open keeps the placeholder."""
     if store is None:
-        return UnavailableForwarder(), None, None
+        return UnavailableForwarder(), None, None, None
     argv = _child_argv(config, installed)
     child = spawner
     if child is None and argv:
@@ -143,14 +144,14 @@ def _routing(
 
         child = InlineSpawner(allowlist_for(argv[0]))
     if child is None or not argv:
-        return UnavailableForwarder(), None, None
+        return UnavailableForwarder(), None, None, None
     from stdio_box.catalog import Catalog
     from stdio_box.forward import StoreForwarder, render_whoami
     from stdio_box.instances import InstanceManager
     from stdio_box.resolver import resolve
 
     if not isinstance(catalog, Catalog):
-        return UnavailableForwarder(), None, None
+        return UnavailableForwarder(), None, None, None
     names = _snapshot_names(snapshot)
     slot_root = getattr(child, "slot_root", "/tmp/box")
     manager = InstanceManager(
@@ -186,7 +187,7 @@ def _routing(
 
         return await anyio.to_thread.run_sync(_resolve)
 
-    return forwarder, _whoami, manager.run
+    return forwarder, _whoami, manager.run, manager
 
 
 def _child_argv(config: Config, installed: InstalledServer | None) -> list[str]:

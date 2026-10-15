@@ -1,0 +1,69 @@
+schema_version: 1
+name: echo-http
+title: Echo HTTP
+server:
+  command: "uvx echo-server==0.0.0"
+  bin: echo-server
+  lock: requirements.txt
+fields:
+  - name: ECHO_URL
+    type: url
+    secret: false
+    hint: "Base address of the account"
+  - name: ECHO_TOKEN
+    type: string
+    secret: true
+    hint: "Token for this account"
+  - name: ECHO_ORG
+    type: string
+    secret: false
+    hint: "Organization id sent with the check"
+  - name: ECHO_ALSO
+    type: string
+    secret: true
+    hint: "Token for the second check"
+variants:
+  - name: one
+    title: Echo
+    fields: [ECHO_URL, ECHO_TOKEN, ECHO_ORG]
+    allowed_hosts: ["*.example"]
+    checks:
+      - http:
+          method: GET
+          url: "{ECHO_URL}/who"
+          auth:
+            bearer: ECHO_TOKEN
+          headers:
+            X-Org-ID: "{ECHO_ORG}"
+          expect_status: [200]
+          identity: name
+          timeout_seconds: 5
+  - name: two
+    title: Echo twice
+    fields: [ECHO_URL, ECHO_TOKEN, ECHO_ORG, ECHO_ALSO]
+    allowed_hosts: ["*.example"]
+    checks:
+      - http:
+          method: GET
+          url: "{ECHO_URL}/who"
+          auth:
+            bearer: ECHO_TOKEN
+          headers:
+            X-Org-ID: "{ECHO_ORG}"
+          expect_status: [200]
+          identity: name
+          timeout_seconds: 5
+      - http:
+          method: GET
+          url: "https://second.example/also"
+          auth:
+            bearer: ECHO_ALSO
+          expect_status: [200]
+          identity: name
+          timeout_seconds: 5
+discovery:
+  mode: placeholder
+  env:
+    ECHO_URL: https://echo.invalid
+    ECHO_TOKEN: discovery-placeholder
+    ECHO_ORG: acme

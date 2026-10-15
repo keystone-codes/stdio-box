@@ -20,6 +20,7 @@ from stdio_box._vendor.keystone_identity import KeystoneIdentity
 from stdio_box.catalog import Catalog
 from stdio_box.config import Config
 from stdio_box.creds_tools import TOOLS, handler_for
+from stdio_box.forms import creds_route
 from stdio_box.identity import CallRejected, ReplayCache, verify_call
 from stdio_box.logs import RequestLogMiddleware
 from stdio_box.provider import Provider
@@ -91,12 +92,15 @@ def build_app(
     schema_newer: bool = False,
     whoami: Callable[[KeystoneIdentity], Awaitable[types.CallToolResult]] | None = None,
     background: Callable[[], AbstractAsyncContextManager[None]] | None = None,
+    form_stats: object | None = None,
 ) -> Starlette:
-    """Starlette app for ``/mcp`` and ``/healthz``. ``/creds/`` is not mounted.
+    """Starlette app for ``/mcp``, ``/healthz``, and ``/creds/{token}`` without a bearer.
 
     ``whoami`` replaces the placeholder ``creds_whoami`` handler when the store
     is open. ``background`` is an async context manager factory (the instance
-    manager) started for the life of the process.
+    manager) started for the life of the process. ``form_stats``, when that
+    manager is running, receives form issue and submit counts for its status
+    snapshot and ``reset_failed`` after a saved rotation.
     """
     replay_cache = ReplayCache()
     server = _build_server(config, provider, catalog, forwarder, replay_cache, whoami)
@@ -126,6 +130,7 @@ def build_app(
                 endpoint=_healthz_route(store, schema_newer=schema_newer),
                 methods=["GET"],
             ),
+            creds_route(config, provider, store, form_stats),
         ],
         lifespan=lifespan,
     )
