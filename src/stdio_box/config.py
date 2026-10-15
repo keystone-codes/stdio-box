@@ -21,6 +21,13 @@ _TIMEOUT_DEFAULT = 240
 _TIMEOUT_MIN = 30
 _TIMEOUT_MAX = 1800
 _CACHE_DEFAULT = Path("/cache")
+_MAX_INSTANCES_DEFAULT = 8
+_MAX_INSTANCES_MIN = 1
+_MAX_INSTANCES_MAX = 32
+_IDLE_DEFAULT = 600
+_START_TIMEOUT_DEFAULT = 60
+_CALL_TIMEOUT_DEFAULT = 120
+_AUDIT_RETENTION_DEFAULT = 30
 
 
 class ConfigError(Exception):
@@ -47,6 +54,11 @@ class Config:
     allowed_hosts: tuple[str, ...]
     debug: bool = False
     child_argv_override: str | None = None
+    max_instances: int = 8
+    idle_seconds: int = 600
+    start_timeout_seconds: int = 60
+    call_timeout_seconds: int = 120
+    audit_retention_days: int = 30
 
 
 @dataclass(frozen=True)
@@ -137,6 +149,24 @@ def _parse(environ: Mapping[str, str]) -> tuple[Config | None, list[str]]:
     log_level = _log_level(environ, errors)
     allowed_hosts = _allowed_hosts(environ.get("BOX_ALLOWED_HOSTS", ""))
     debug, child_argv_override = read_spawner_settings(environ)
+    max_instances = _ranged_int(
+        environ,
+        "BOX_MAX_INSTANCES",
+        _MAX_INSTANCES_DEFAULT,
+        _MAX_INSTANCES_MIN,
+        _MAX_INSTANCES_MAX,
+        errors,
+    )
+    idle_seconds = _positive_seconds(environ, "BOX_IDLE_SECONDS", _IDLE_DEFAULT, errors)
+    start_timeout_seconds = _positive_seconds(
+        environ, "BOX_START_TIMEOUT_SECONDS", _START_TIMEOUT_DEFAULT, errors
+    )
+    call_timeout_seconds = _positive_seconds(
+        environ, "BOX_CALL_TIMEOUT_SECONDS", _CALL_TIMEOUT_DEFAULT, errors
+    )
+    audit_retention_days = _ranged_int(
+        environ, "BOX_AUDIT_RETENTION_DAYS", _AUDIT_RETENTION_DEFAULT, 1, 3650, errors
+    )
 
     if errors:
         return None, errors
@@ -156,6 +186,11 @@ def _parse(environ: Mapping[str, str]) -> tuple[Config | None, list[str]]:
             allowed_hosts=allowed_hosts,
             debug=debug,
             child_argv_override=child_argv_override,
+            max_instances=max_instances,
+            idle_seconds=idle_seconds,
+            start_timeout_seconds=start_timeout_seconds,
+            call_timeout_seconds=call_timeout_seconds,
+            audit_retention_days=audit_retention_days,
         ),
         [],
     )
@@ -219,6 +254,34 @@ def _log_level(environ: Mapping[str, str], errors: list[str]) -> str:
         errors.append("BOX_LOG_LEVEL")
         return "INFO"
     return level
+
+
+def _ranged_int(
+    environ: Mapping[str, str],
+    name: str,
+    default: int,
+    low: int,
+    high: int,
+    errors: list[str],
+) -> int:
+    raw = environ.get(name, "").strip()
+    if raw == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        errors.append(name)
+        return default
+    if value < low or value > high:
+        errors.append(name)
+        return default
+    return value
+
+
+def _positive_seconds(
+    environ: Mapping[str, str], name: str, default: int, errors: list[str]
+) -> int:
+    return _ranged_int(environ, name, default, 1, 31_536_000, errors)
 
 
 def _allowed_hosts(raw: str) -> tuple[str, ...]:

@@ -2,8 +2,8 @@
 
 import hmac
 import re
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from typing import Any, Protocol
 
 import mcp.types as types
@@ -39,6 +39,8 @@ class Forwarder(Protocol):
         name: str,
         child_name: str,
         arguments: dict[str, Any],
+        *,
+        identity_token: str | None = None,
     ) -> types.CallToolResult: ...
 
 
@@ -51,6 +53,8 @@ class UnavailableForwarder:
         _name: str,
         _child_name: str,
         _arguments: dict[str, Any],
+        *,
+        identity_token: str | None = None,
     ) -> types.CallToolResult:
         return Refusal(
             NOT_AVAILABLE,
@@ -85,19 +89,29 @@ def build_app(
     store: object | None = None,
     *,
     schema_newer: bool = False,
+    whoami: Callable[[KeystoneIdentity], Awaitable[types.CallToolResult]] | None = None,
+    background: Callable[[], AbstractAsyncContextManager[None]] | None = None,
 ) -> Starlette:
-    """Starlette app for ``/mcp`` and ``/healthz``. ``/creds/`` is not mounted."""
+    """Starlette app for ``/mcp`` and ``/healthz``. ``/creds/`` is not mounted.
+
+    ``whoami`` replaces the placeholder ``creds_whoami`` handler when the store
+    is open. ``background`` is an async context manager factory (the instance
+    manager) started for the life of the process.
+    """
     replay_cache = ReplayCache()
-    server = _build_server(config, provider, catalog, forwarder, replay_cache)
-    manager = StreamableHTTPSessionManager(app=server, stateless=True, json_response=True)
+    server = _build_server(config, provider, catalog, forwarder, replay_cache, whoami)
+    sessions = StreamableHTTPSessionManager(app=server, stateless=True, json_response=True)
 
     class _McpEndpoint:
         async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-            await manager.handle_request(scope, receive, send)
+            await sessions.handle_request(scope, receive, send)
 
     @asynccontextmanager
     async def lifespan(_app: Starlette) -> AsyncIterator[None]:
-        async with manager.run():
+        async with AsyncExitStack() as stack:
+            if background is not None:
+                await stack.enter_async_context(background())
+            await stack.enter_async_context(sessions.run())
             yield
 
     app = Starlette(
@@ -125,6 +139,7 @@ def _build_server(
     catalog: Catalog,
     forwarder: Forwarder,
     replay_cache: ReplayCache,
+    whoami: Callable[[KeystoneIdentity], Awaitable[types.CallToolResult]] | None,
 ) -> Server:
     server: Server = Server("stdio-box", version=__version__)
     if not hasattr(server, "list_tools"):
@@ -147,12 +162,15 @@ def _build_server(
             identity = verify_call(headers, name, config, replay_cache)
         except CallRejected as exc:
             return exc.refusal.as_result()
+        if name == "creds_whoami" and whoami is not None:
+            return await whoami(identity)
         handler = handler_for(name)
         if handler is not None:
             return await handler(provider, identity, arguments)
         child = catalog.child_name(name)
         if child is not None:
-            return await forwarder.call(identity, name, child, arguments)
+            token = headers.get("x-keystone-identity")
+            return await forwarder.call(identity, name, child, arguments, identity_token=token)
         return Refusal(
             INVALID_ARGUMENT,
             "unknown tool",
