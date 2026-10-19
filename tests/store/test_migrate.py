@@ -10,18 +10,18 @@ from stdio_box.store.errors import StoreSchemaNewer
 from stdio_box.store.migrate import migrate, migrations_dir, schema_version
 
 
-def test_clean_database_reaches_version_one_and_restart_is_a_no_op(tmp_path: Path) -> None:
+def test_clean_database_reaches_the_latest_version_and_restart_is_a_no_op(tmp_path: Path) -> None:
     data = tmp_path / "data"
     data.mkdir()
     path = data / "box.sqlite3"
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     conn = sqlite3.connect(path)
-    assert migrate(conn, data, now) == 1
+    assert migrate(conn, data, now) == 2
     conn.close()
 
     conn = sqlite3.connect(path)
     before = schema_version(conn)
-    assert migrate(conn, data, now) == before == 1
+    assert migrate(conn, data, now) == before == 2
     conn.close()
     backup = data / "backup"
     assert not backup.exists() or list(backup.iterdir()) == []

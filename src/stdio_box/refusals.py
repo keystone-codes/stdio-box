@@ -28,6 +28,7 @@ SECRET_REENTRY_REQUIRED = "secret_reentry_required"
 MISSING_FIELDS = "missing_fields"
 FORM_UNAVAILABLE = "form_unavailable"
 CHECK_FAILED = "check_failed"
+SNAPSHOT_INVALID = "snapshot_invalid"
 
 
 @dataclass(frozen=True)

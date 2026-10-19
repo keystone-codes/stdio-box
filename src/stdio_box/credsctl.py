@@ -39,6 +39,8 @@ _USAGE = """usage: credsctl [--json] <command> [<args>]
        credsctl store status
        credsctl store rekey --old-key-file <path|->
        credsctl audit [--since 24h] [--profile <id>] [--event <name>]
+       credsctl snapshot list
+       credsctl snapshot export <id>
        credsctl status"""
 
 _ACTOR = "cli:credsctl"
@@ -133,6 +135,8 @@ def _dispatch(args: list[str]) -> dict:
         return _store(rest)
     if command == "audit":
         return _audit_command(rest)
+    if command == "snapshot":
+        return _snapshot(rest)
     if command == "status":
         return _status(rest)
     raise _Usage(_USAGE)
@@ -474,6 +478,44 @@ def _audit_command(args: list[str]) -> dict:
         store.close()
 
 
+def _snapshot(args: list[str]) -> dict:
+    """``list`` shows stored tool snapshots without their JSON. ``export`` returns one.
+
+    Without ``--json``, ``export`` prints the stored JSON exactly as stored.
+    """
+    if args == ["list"]:
+        provider = _load_provider()
+        store = _open_store(provider)
+        try:
+            return {
+                "snapshots": [
+                    {
+                        "id": item.id,
+                        "sha256": item.sha256,
+                        "taken_at": item.taken_at,
+                        "profile": item.profile,
+                    }
+                    for item in store.list_tool_snapshots()
+                ]
+            }
+        finally:
+            store.close()
+    if len(args) == 2 and args[0] == "export":
+        raw = args[1]
+        provider = _load_provider()
+        store = _open_store(provider)
+        try:
+            found = None
+            if raw.isdigit() and raw.isascii():
+                found = store.get_tool_snapshot(int(raw))
+            if found is None:
+                raise _Input("snapshot_not_found", "snapshot not found")
+            return {"id": found.id, "sha256": found.sha256, "snapshot": found.body}
+        finally:
+            store.close()
+    raise _Usage("usage: credsctl snapshot list | credsctl snapshot export <id>")
+
+
 def _status(args: list[str]) -> dict:
     if args:
         raise _Usage(_USAGE)
@@ -729,6 +771,13 @@ def _print_human(result: dict) -> None:
             print("  none")
         else:
             print(f"  {result['default']['profile']}")
+        return
+    if "snapshot" in result and isinstance(result["snapshot"], str):
+        sys.stdout.write(result["snapshot"])
+        return
+    if "snapshots" in result:
+        for item in result["snapshots"]:
+            print(f"{item['id']}  {item['sha256']}  {item['taken_at']}  {item['profile']}")
         return
     if "events" in result:
         for event in result["events"]:

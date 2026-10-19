@@ -51,7 +51,7 @@ def public_dns(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_input_schemas() -> None:
-    assert len(TOOLS) == 10
+    assert len(TOOLS) == 11
     for tool in TOOLS:
         Draft202012Validator.check_schema(tool.inputSchema)
 

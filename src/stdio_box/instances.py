@@ -258,6 +258,10 @@ class InstanceManager:
         finally:
             await self._release_ephemeral(inst, slot)
 
+    def has_free_slot(self) -> bool:
+        """Whether ``start_ephemeral`` would find a slot right now. Nothing is reserved."""
+        return self._tg is not None and self._free_slot() is not None
+
     def reset_failed(self, profile_id: str) -> None:
         """Clear a profile that exhausted its start attempts.
 
@@ -981,6 +985,10 @@ def _failed(profile_id: str) -> Refusal:
         f"The server for account {profile_id} failed to start.",
         "Check the account, then run a credential check or rotate its secrets.",
     )
+
+
+def exhausted_refusal() -> Refusal:
+    return _exhausted()
 
 
 def _exhausted() -> Refusal:

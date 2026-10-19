@@ -42,10 +42,10 @@ Checks on `/mcp`, in order:
 
 1. `Host`, with or without a port, must be `BOX_IDENTITY_AUDIENCE`, that name plus `-mcp`, `localhost`, `127.0.0.1`, or a name from `BOX_ALLOWED_HOSTS`. Otherwise HTTP 421 and `{"error":"misdirected_request"}`.
 2. `Authorization: Bearer` must match `BOX_BEARER_TOKEN`. The comparison does not stop early on length. Otherwise HTTP 401 and `WWW-Authenticate: Bearer`. The MCP parser does not run.
-3. `tools/list` carries no identity. The box returns the published tools from `tools.snapshot.json`, then the ten `creds_*` tools. It does not start the provider server.
+3. `tools/list` carries no identity. The box returns the published tools from `tools.snapshot.json`, then the eleven `creds_*` tools. It does not start the provider server. Only `creds_snapshot_tools` asks the server for a fresh list, and it does that under the caller's own profile.
 4. `tools/call` requires `X-Keystone-Identity`: HS256, header `typ` of `keystone-identity+jwt`, audience `BOX_IDENTITY_AUDIENCE`. `mcp_target` must be the tool name on this call. Each `jti` is accepted once, and remembered until its `exp` plus 30 seconds. The memory holds at most 100000 entries; when it is full the call is rejected and nothing already stored is dropped.
 
-A failed tool call is `isError: true` with one text block of JSON: `code`, `message`, and `hint`. `code` is one of `identity_rejected`, `no_credentials_profile`, `tool_not_in_profile`, `profile_needs_reentry`, `instance_unavailable`, `instance_failed`, `instances_exhausted`, `instance_busy`, `upstream_timeout`, `not_available`, `invalid_argument`, `unknown_provider`, `profile_exists`, `profile_not_found`, `profile_in_use`, `binding_exists`, `binding_not_found`, `secret_field_in_chat`, `secret_reentry_required`, `missing_fields`, `form_unavailable`, `check_failed`. There is no `credentials_ambiguous` code: when several bindings match, the first in order is the one that applies.
+A failed tool call is `isError: true` with one text block of JSON: `code`, `message`, and `hint`. `code` is one of `identity_rejected`, `no_credentials_profile`, `tool_not_in_profile`, `profile_needs_reentry`, `instance_unavailable`, `instance_failed`, `instances_exhausted`, `instance_busy`, `upstream_timeout`, `not_available`, `invalid_argument`, `unknown_provider`, `profile_exists`, `profile_not_found`, `profile_in_use`, `binding_exists`, `binding_not_found`, `secret_field_in_chat`, `secret_reentry_required`, `missing_fields`, `form_unavailable`, `check_failed`, `snapshot_invalid`. There is no `credentials_ambiguous` code: when several bindings match, the first in order is the one that applies.
 
 `tools.snapshot.json` is the provider server's `tools/list`, stored as-is:
 
@@ -331,7 +331,7 @@ uv pip compile --universal --generate-hashes --python-version 3.12 requirements.
 npm install --package-lock-only
 ```
 
-`uv pip compile --universal` records wheels for more than one platform, and `uv pip install` honors those markers. Do not hand-write `tools.snapshot.json`. `keystonectl package wrap-stdio` runs `snapshot-tools` in this image and writes the file. Commit the lock and the snapshot with `provider.yaml`.
+`uv pip compile --universal` records wheels for more than one platform, and `uv pip install` honors those markers. Do not hand-write `tools.snapshot.json`. `keystonectl package wrap-stdio` runs `snapshot-tools` in this image and writes the file. A server that does not answer `tools/list` with placeholder values can be listed by a running box instead: `creds_snapshot_tools` takes the list under an account someone already entered on the form, and `credsctl snapshot export <id>` prints it. No secret has to be written to a file for that. Commit the lock and the snapshot with `provider.yaml`.
 
 ## Security model
 
@@ -380,6 +380,7 @@ Profiles and bindings live in `<BOX_DATA_DIR>/box.sqlite3` (in the image, `/data
 | `bindings` | who receives which profile, and the role order |
 | `form_links` | SHA-256 of a form token, never the token |
 | `audit` | calls and admin actions, kept for `BOX_AUDIT_RETENTION_DAYS` (30) |
+| `tool_snapshots` | the newest five `tools/list` snapshots taken by `creds_snapshot_tools`: id, `sha256`, `taken_at`, profile, variant, the binding subject, and the JSON |
 | `status` | one JSON snapshot written by the running wrapper |
 
 `BOX_STORE_KEY` is the key generated for the package (`secrets.token_urlsafe(32)`). The store derives separate 32-byte keys with HKDF-SHA256 for secrets, the key check, form CSRF, and audit subject hashes. Secret fields of one profile are a single JSON object sealed with AES-256-GCM. The nonce is random. The additional data is the profile id and the secret version, so a row cannot be moved under another profile or version.
@@ -396,7 +397,7 @@ A database written by a newer build is not opened and is not modified. An intern
 
 ## Box tools
 
-An administrator configures the box from chat. These ten tools are part of the server's catalog. Secret values never travel in either direction: a tool result, a refusal, a log line, and an audit row never contain one. The person who owns the account types secrets on the one-time form.
+An administrator configures the box from chat. These eleven tools are part of the server's catalog. Secret values never travel in either direction: a tool result, a refusal, a log line, and an audit row never contain one. The person who owns the account types secrets on the one-time form.
 
 | Tool | What it does |
 |---|---|
@@ -410,6 +411,30 @@ An administrator configures the box from chat. These ten tools are part of the s
 | `creds_unbind` | Remove one binding. Role positions below it move up. |
 | `creds_whoami` | Which profile this caller would use, which binding won, and which other role bindings were skipped. |
 | `creds_check` | Run the variant's checks and start the instance. Both have to succeed. |
+| `creds_snapshot_tools` | Take the server's `tools/list` under the caller's own profile and store the snapshot in the box. |
+
+### `creds_snapshot_tools`
+
+Takes no arguments. The profile is the one a provider call of this caller would use, by the same order as [How a call is routed](#how-a-call-is-routed): the profile `creds_whoami` shows. No argument can name another profile. A caller with no profile gets `no_credentials_profile`; a profile without readable secrets gets `profile_needs_reentry`. The box does not ask for a signed-in person: the tool only reads, under the caller's own account. Who may call it is the policy's decision; `<ns>_box_admin` covers it through `<ns>_creds_*`, and it is not in `requires_human_identity`. Annotations: `readOnlyHint: true`, `openWorldHint: true`.
+
+The box starts one short-lived server on a free slot with that profile, calls `tools/list`, and stops it. When every slot is in use the call is `instances_exhausted`; a server that does not start or does not list its tools is `instance_failed`; a listing that does not arrive within `BOX_CALL_TIMEOUT_SECONDS` is `upstream_timeout`. A listing whose names cannot be published under the provider's `tools` rules is `snapshot_invalid` and is not stored.
+
+The stored snapshot is the same document `stdio-box snapshot-tools --out -` writes: `schema_version`, `server.command`, `taken_at`, and `tools` exactly as the server listed them. The `tools` rules are not applied to it; they are applied when the box loads a `tools.snapshot.json`. The box keeps the newest five snapshots in the table `tool_snapshots` and deletes older ones. `credsctl snapshot list` and `credsctl snapshot export <id>` read them.
+
+Result:
+
+```json
+{
+  "id": 3,
+  "sha256": "5f0c…e1a2",
+  "tools": ["get_issue", "search", "create_issue"],
+  "profile": "atlassian/shared",
+  "variant": "cloud",
+  "variant_filters_tools": true
+}
+```
+
+`tools` are the published names after the provider's `tools` rules (`strip_prefix`, `normalize`, `rename`, `hide`), without the namespace and without the variant's patterns. `variant_filters_tools` is `true` when the profile's variant lists `tools` patterns: that account may see a narrower set, and a package built from this snapshot publishes that set to everyone. `sha256` is the hex SHA-256 of the snapshot without `taken_at`, as `json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False)` encoded as UTF-8, so two snapshots of the same server have the same hash. The result, the log, the audit row, and the table never contain a secret value.
 
 `creds_profile_create` and `creds_profile_rotate` accept only non-secret fields. Naming a secret field, in any letter case, is refused and the value is discarded. A field of type `url` is checked before anything is written. Changing a URL, or any field that a check places in a URL or a header, requires the secrets to be entered again on the form. Stored secrets are never sent to a new address.
 
@@ -435,7 +460,7 @@ The box does not check roles. Whoever the policy lets call `<ns>_creds_*` manage
 
 Do not give `<ns>_*` to an ordinary role. A pattern is matched against the full published name, so `billing_*` covers **every** tool of namespace `billing`, including `billing_admin_report`. The same pattern on this box also covers `<ns>_creds_profile_delete` and the other account tools. List the tool names the role should have. `stdio-box policy-example --namespace <ns>` prints a reader role and a writer role that do that, and a `<ns>_box_admin` role whose only grant is `<ns>_creds_*`. keystonectl prints that file and does not merge it into the policy.
 
-The five tools that change accounts (`creds_profile_create`, `creds_profile_rotate`, `creds_profile_delete`, `creds_bind`, `creds_unbind`) are listed in `requires_human_identity`. Only a signed-in person may change accounts. An API key or a service account must not: those calls act for a machine, and a machine must not be able to rebind the accounts everyone else uses. The door enforces that list. The box does not.
+The five tools that change accounts (`creds_profile_create`, `creds_profile_rotate`, `creds_profile_delete`, `creds_bind`, `creds_unbind`) are listed in `requires_human_identity`. `creds_snapshot_tools` is not: it changes no account and runs under the caller's own profile. `<ns>_box_admin` covers it through `<ns>_creds_*`. Only a signed-in person may change accounts. An API key or a service account must not: those calls act for a machine, and a machine must not be able to rebind the accounts everyone else uses. The door enforces that list. The box does not.
 
 ## Moving or reinstalling a box
 
@@ -517,12 +542,16 @@ credsctl bindings
 credsctl store status
 credsctl store rekey --old-key-file <path|->
 credsctl audit [--since 24h] [--profile <id>] [--event <name>]
+credsctl snapshot list
+credsctl snapshot export <id>
 credsctl status
 ```
 
 `profile import` reads an env file (`NAME=value`, blank lines and `#` comments skipped, quotes left as typed). The file must be mode `0600` unless the path is `-` (stdin). Without `--variant`, the variant is the one whose fields are exactly the non-empty provider fields in the file. A file that matches none (or more than one) is `variant_ambiguous`. Keys that are not provider fields are `unknown_fields` unless `--ignore-unknown` is set, in which case those names are skipped and listed as `ignored`. `--if-absent` on a profile that already exists exits 4 and writes nothing. Import does not bind the profile; bind is a separate command. Without `--no-check`, the variant's HTTP checks run before anything is written. A refusal exits 1 and leaves the store unchanged. If a check cannot be reached, the import still exits 0 (`check: unreachable`) and `last_check_ok` stays null. `--no-check` stores the values without a check (`check: skipped`, `last_check_ok` null).
 
 `bindings` prints `user`, then `role` with positions, then `default` — the same order a call is resolved in.
+
+`snapshot list` prints the stored tool snapshots, newest first: `id`, `sha256`, `taken_at`, and `profile`, without the JSON. `snapshot export <id>` prints that snapshot's JSON on stdout byte for byte as stored. With `--json`, `result` is `{"id", "sha256", "snapshot"}` and `snapshot` is that same text as a string. An id that is not stored exits 3 with `snapshot_not_found`.
 
 `store status` reports `key_state`, `schema_version`, how many profiles there are, and how many are `needs_reentry`. `status` prints the wrapper's status row. Until the wrapper is running it is `{"status": "not running"}`.
 
@@ -533,7 +562,7 @@ Exit codes:
 | 0 | Done. An import whose check could not reach the provider is still 0 (`check: unreachable`). |
 | 1 | The provider rejected the values. Nothing was written. |
 | 2 | Usage. |
-| 3 | Invalid input: `unknown_fields`, `missing_fields`, `variant_ambiguous`, file mode, a bad id, subject, or position, `profile_in_use`, `binding_exists`. |
+| 3 | Invalid input: `unknown_fields`, `missing_fields`, `variant_ambiguous`, file mode, a bad id, subject, or position, `profile_in_use`, `binding_exists`, `snapshot_not_found`. |
 | 4 | `--if-absent` and the profile already exists. |
 | 5 | The store cannot be opened, including a database newer than this program (`store_schema_newer`). |
 
@@ -547,6 +576,16 @@ docker compose exec -T <service> \
   < jira.env
 docker compose exec -T <service> credsctl bind default atlassian/shared
 ```
+
+## Box tools of this image
+
+`stdio-box box-tools` prints the names of this image's own `creds_*` tools as one JSON array on one line and exits 0:
+
+```json
+["creds_providers", "creds_profiles", "creds_bindings", "creds_profile_create", "creds_profile_rotate", "creds_profile_delete", "creds_bind", "creds_unbind", "creds_whoami", "creds_check", "creds_snapshot_tools"]
+```
+
+It reads no configuration. Use it to learn which box tools an image has instead of reading its tag.
 
 ## Releasing
 
