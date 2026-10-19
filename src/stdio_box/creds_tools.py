@@ -1,7 +1,7 @@
 """Credential tools and the sample policy printed by ``stdio-box policy-example``.
 
 ``creds_whoami`` is rendered by the call router. The handlers here are the other
-nine tools. The box does not check roles.
+ten tools. The box does not check roles.
 """
 
 import fnmatch
@@ -18,16 +18,17 @@ import anyio
 import mcp.types as types
 
 from stdio_box._vendor.keystone_identity import KeystoneIdentity
-from stdio_box.catalog import Catalog
+from stdio_box.catalog import Catalog, CatalogError, build_catalog
 from stdio_box.checks import run_checks
 from stdio_box.config import Config
-from stdio_box.instances import InstanceManager
+from stdio_box.instances import InstanceManager, exhausted_refusal
 from stdio_box.provider import Provider, Variant
 from stdio_box.refusals import (
     BINDING_EXISTS,
     BINDING_NOT_FOUND,
     CHECK_FAILED,
     FORM_UNAVAILABLE,
+    INSTANCE_FAILED,
     INVALID_ARGUMENT,
     MISSING_FIELDS,
     NOT_AVAILABLE,
@@ -36,11 +37,14 @@ from stdio_box.refusals import (
     PROFILE_NOT_FOUND,
     SECRET_FIELD_IN_CHAT,
     SECRET_REENTRY_REQUIRED,
+    SNAPSHOT_INVALID,
     UNKNOWN_PROVIDER,
+    UPSTREAM_TIMEOUT,
     Refusal,
 )
-from stdio_box.resolver import reentry_refusal
+from stdio_box.resolver import Resolution, no_credentials_refusal, reentry_refusal, resolve
 from stdio_box.runtime import get_install, get_isolation
+from stdio_box.snapshot import build_snapshot, listed_tools, render_snapshot, snapshot_sha256
 from stdio_box.store.errors import (
     BindingExists,
     BindingNotFound,
@@ -180,7 +184,21 @@ TOOLS: list[types.Tool] = [
         description="Check a profile's credentials.",
         inputSchema=_object({"profile": _PROFILE}, ["profile"]),
     ),
+    types.Tool(
+        name="creds_snapshot_tools",
+        description=(
+            "Start the provider server once under the caller's own profile, take its "
+            "tools/list, and store that snapshot in the box."
+        ),
+        inputSchema=_EMPTY,
+        annotations=types.ToolAnnotations(readOnlyHint=True, openWorldHint=True),
+    ),
 ]
+
+
+def box_tool_names() -> list[str]:
+    """Names of this build's own ``creds_*`` tools, in catalog order."""
+    return [tool.name for tool in TOOLS]
 
 
 def handler_for(name: str) -> _Handler | None:
@@ -193,7 +211,13 @@ def render_policy_example(
     namespace: str,
     critical: list[str],
 ) -> str:
-    """YAML sample from DESIGN 7.7. ``namespace`` replaces the example name."""
+    """YAML sample from DESIGN 7.7. ``namespace`` replaces the example name.
+
+    ``creds_snapshot_tools`` is granted to ``<ns>_box_admin`` by ``<ns>_creds_*``
+    and is not in ``requires_human_identity``: it only reads, under the caller's
+    own profile. The rendered text does not name it, so the committed
+    ``policy.example.yaml`` files of released packages stay valid.
+    """
     if _NAMESPACE.fullmatch(namespace) is None:
         raise ValueError("namespace is not a policy namespace")
     published = catalog.published_tools()
@@ -947,6 +971,163 @@ async def _check(
     )
 
 
+class _SnapshotStopped(Exception):
+    def __init__(self, refusal: Refusal) -> None:
+        self.refusal = refusal
+        super().__init__(refusal.code)
+
+
+async def _snapshot_tools(
+    provider: Provider,
+    identity: KeystoneIdentity,
+    arguments: dict[str, Any],
+    deps: CredsDeps | None = None,
+) -> types.CallToolResult:
+    """Take ``tools/list`` under the profile a provider call of this caller would use.
+
+    The profile is chosen by the same resolver as a provider call; no argument
+    can name another one. The stored JSON is the raw listing, the same document
+    ``snapshot-tools`` writes. ``tools`` in the result are the names after the
+    provider's ``tools`` rules.
+    """
+    if deps is None:
+        return _not_ready()
+    tool = "creds_snapshot_tools"
+    arguments = arguments or {}
+    refused = _only_keys(arguments, set())
+    if refused is not None:
+        return refused.as_result()
+    resolution = await anyio.to_thread.run_sync(lambda: resolve(deps.store, provider, identity))
+    profile = resolution.profile
+    if resolution.refusal is not None or profile is None or resolution.binding is None:
+        refusal = resolution.refusal or no_credentials_refusal(provider)
+        return await _snapshot_audit(deps, identity, tool, resolution, refusal=refusal)
+    variant = _variant(provider, profile.variant)
+    if variant is None:
+        refusal = _invalid("The profile variant is not on this provider.")
+        return await _snapshot_audit(deps, identity, tool, resolution, refusal=refusal)
+    try:
+        secrets = await anyio.to_thread.run_sync(lambda: deps.store.read_secrets(profile.id))
+    except SecretUnreadable:
+        return await _snapshot_audit(
+            deps, identity, tool, resolution, refusal=reentry_refusal(profile)
+        )
+    values = {**profile.public_fields, **secrets}
+    try:
+        tools = await _list_under(deps, provider, variant, values, profile.id)
+    except _SnapshotStopped as exc:
+        return await _snapshot_audit(deps, identity, tool, resolution, refusal=exc.refusal)
+    snapshot = build_snapshot(provider, tools)
+    try:
+        published = [item.name for item in build_catalog(snapshot, provider).published_tools()]
+    except CatalogError as exc:
+        refusal = Refusal(
+            SNAPSHOT_INVALID,
+            f"The server's tools cannot be published with this provider: {exc}",
+            "Fix the tools rules in provider.yaml, then take the snapshot again.",
+        )
+        return await _snapshot_audit(deps, identity, tool, resolution, refusal=refusal)
+    body = render_snapshot(snapshot)
+    digest = snapshot_sha256(snapshot)
+    subject = resolution.binding.subject
+    snapshot_id = await anyio.to_thread.run_sync(
+        lambda: deps.store.put_tool_snapshot(
+            body,
+            sha256=digest,
+            taken_at=snapshot["taken_at"],
+            profile=profile.id,
+            variant=variant.name,
+            subject=subject,
+        )
+    )
+    payload = {
+        "id": snapshot_id,
+        "sha256": digest,
+        "tools": published,
+        "profile": profile.id,
+        "variant": variant.name,
+        "variant_filters_tools": variant.tools is not None,
+    }
+    return await _snapshot_audit(
+        deps, identity, tool, resolution, payload=payload, snapshot_id=snapshot_id
+    )
+
+
+async def _list_under(
+    deps: CredsDeps,
+    provider: Provider,
+    variant: Variant,
+    values: Mapping[str, str],
+    profile_id: str,
+) -> list[dict]:
+    if not deps.manager.has_free_slot():
+        raise _SnapshotStopped(exhausted_refusal())
+    failed = Refusal(
+        INSTANCE_FAILED,
+        f"The server for account {profile_id} could not list its tools.",
+        "Run creds_check on the account, then take the snapshot again.",
+    )
+    try:
+        async with deps.manager.start_ephemeral(provider, variant, values) as session:
+            if session is None:
+                raise _SnapshotStopped(failed)
+            with anyio.fail_after(deps.config.call_timeout_seconds):
+                listed = await session.list_tools()
+    except _SnapshotStopped:
+        raise
+    except TimeoutError:
+        raise _SnapshotStopped(
+            Refusal(
+                UPSTREAM_TIMEOUT,
+                "The server did not list its tools in time.",
+                "Retry, or raise BOX_CALL_TIMEOUT_SECONDS.",
+                retryable=True,
+            )
+        ) from None
+    except Exception as exc:
+        _LOG.warning("snapshot tools/list failed for %s (%s)", profile_id, type(exc).__name__)
+        raise _SnapshotStopped(failed) from None
+    return listed_tools(listed)
+
+
+async def _snapshot_audit(
+    deps: CredsDeps,
+    identity: KeystoneIdentity,
+    tool: str,
+    resolution: Resolution,
+    *,
+    refusal: Refusal | None = None,
+    payload: dict[str, Any] | None = None,
+    snapshot_id: int | None = None,
+) -> types.CallToolResult:
+    binding = None
+    if resolution.binding is not None:
+        binding = {"subject": resolution.binding.subject, "position": resolution.binding.position}
+    detail: dict[str, Any] = {"binding": binding, "snapshot": snapshot_id}
+
+    def _write() -> None:
+        deps.store.record(
+            "call" if refusal is None else "refusal",
+            sub=identity.sub,
+            jti=identity.jti,
+            tool=tool,
+            profile_id=resolution.profile_id,
+            tier=resolution.tier,
+            outcome="ok" if refusal is None else "refused",
+            code=None if refusal is None else refusal.code,
+            detail=detail,
+        )
+
+    try:
+        await anyio.to_thread.run_sync(_write)
+    except Exception:
+        _LOG.warning("snapshot audit failed")
+    if refusal is not None:
+        return refusal.as_result()
+    assert payload is not None
+    return _ok(payload)
+
+
 def _ok(payload: dict[str, Any]) -> types.CallToolResult:
     return types.CallToolResult(
         content=[types.TextContent(type="text", text=json.dumps(payload))],
@@ -1397,3 +1578,4 @@ _HANDLERS["creds_profile_delete"] = _delete
 _HANDLERS["creds_bind"] = _bind
 _HANDLERS["creds_unbind"] = _unbind
 _HANDLERS["creds_check"] = _check
+_HANDLERS["creds_snapshot_tools"] = _snapshot_tools

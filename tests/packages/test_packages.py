@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 import yaml
+from tests.support.box_tools import box_tools_for
 
 from stdio_box.catalog import _published_name, build_catalog
-from stdio_box.creds_tools import TOOLS
 from stdio_box.provider import Provider, load_provider
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -62,7 +62,7 @@ def test_provider_package(package: Path) -> None:
     snapshot = json.loads((package / "tools.snapshot.json").read_text(encoding="utf-8"))
     assert snapshot["server"]["command"] == provider.server.command
     published = [tool.name for tool in build_catalog(snapshot, provider).published_tools()]
-    creds = [tool.name for tool in TOOLS]
+    creds = box_tools_for(image)
     assert manifest["mcp"]["tools"] == published + creds
     assert manifest["mcp"]["critical"] == _critical(snapshot, provider) + list(CHANGING_CREDS)
     for name in manifest["mcp"]["tools"]:

@@ -11,7 +11,16 @@ from stdio_box.store.errors import (
     StoreError,
     StoreSchemaNewer,
 )
-from stdio_box.store.repo import Binding, Bindings, BindResult, FormLink, Match, Profile, Store
+from stdio_box.store.repo import (
+    Binding,
+    Bindings,
+    BindResult,
+    FormLink,
+    Match,
+    Profile,
+    Store,
+    ToolSnapshot,
+)
 
 __all__ = [
     "BindResult",
@@ -30,4 +39,5 @@ __all__ = [
     "Store",
     "StoreError",
     "StoreSchemaNewer",
+    "ToolSnapshot",
 ]
