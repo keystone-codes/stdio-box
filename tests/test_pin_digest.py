@@ -74,7 +74,7 @@ def _changed_lines(before: bytes, after: bytes) -> list[int]:
 
 def test_pin_real_manifests_change_only_the_image_line(tmp_path: Path) -> None:
     packages = ROOT / "packages"
-    (tmp_path / "pyproject.toml").write_bytes((ROOT / "pyproject.toml").read_bytes())
+    _pyproject(tmp_path)
     (tmp_path / "IMAGE").write_bytes((ROOT / "IMAGE").read_bytes())
     before: dict[Path, bytes] = {}
     for name in _RELEASE_PACKAGES:

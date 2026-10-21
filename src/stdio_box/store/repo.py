@@ -51,6 +51,7 @@ from stdio_box.store.migrate import migrate
 _PROFILE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 _ROLE_SUBJECT = re.compile(r"^role:[A-Za-z0-9_.-]{1,64}$")
 _DEFAULT_RETENTION_DAYS = 30
+TOOL_SNAPSHOTS_KEPT = 5
 
 
 @dataclass(frozen=True)
@@ -113,6 +114,19 @@ class FormLink:
     attempts: int
     created_by: str
     created_at: str
+
+
+@dataclass(frozen=True)
+class ToolSnapshot:
+    """One stored ``tools/list`` snapshot. ``body`` is empty in listings."""
+
+    id: int
+    sha256: str
+    taken_at: str
+    profile: str
+    variant: str
+    subject: str
+    body: str
 
 
 class Store:
@@ -622,6 +636,82 @@ class Store:
                 self._conn.execute("ROLLBACK")
                 raise
             secure_files(self.path)
+
+    def put_tool_snapshot(
+        self,
+        body: str,
+        *,
+        sha256: str,
+        taken_at: str,
+        profile: str,
+        variant: str,
+        subject: str,
+        keep: int = TOOL_SNAPSHOTS_KEPT,
+    ) -> int:
+        """Store one raw snapshot and drop all but the newest ``keep``. Return its id.
+
+        Like ``write_status``, this does not bump ``meta.revision``: a snapshot
+        is not a credentials change.
+        """
+        with self._lock:
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = self._conn.execute(
+                    "INSERT INTO tool_snapshots (sha256, taken_at, profile, variant, subject, body) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (sha256, taken_at, profile, variant, subject, body),
+                )
+                snapshot_id = int(cursor.lastrowid)
+                self._conn.execute(
+                    "DELETE FROM tool_snapshots WHERE id NOT IN "
+                    "(SELECT id FROM tool_snapshots ORDER BY id DESC LIMIT ?)",
+                    (max(1, keep),),
+                )
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+            secure_files(self.path)
+            return snapshot_id
+
+    def list_tool_snapshots(self) -> list[ToolSnapshot]:
+        """Stored snapshots, newest first, without their JSON."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, sha256, taken_at, profile, variant, subject FROM tool_snapshots "
+                "ORDER BY id DESC"
+            ).fetchall()
+        return [
+            ToolSnapshot(
+                id=int(row["id"]),
+                sha256=row["sha256"],
+                taken_at=row["taken_at"],
+                profile=row["profile"],
+                variant=row["variant"],
+                subject=row["subject"],
+                body="",
+            )
+            for row in rows
+        ]
+
+    def get_tool_snapshot(self, snapshot_id: int) -> ToolSnapshot | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, sha256, taken_at, profile, variant, subject, body "
+                "FROM tool_snapshots WHERE id = ?",
+                (snapshot_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return ToolSnapshot(
+            id=int(row["id"]),
+            sha256=row["sha256"],
+            taken_at=row["taken_at"],
+            profile=row["profile"],
+            variant=row["variant"],
+            subject=row["subject"],
+            body=row["body"],
+        )
 
     def read_status(self) -> dict | None:
         with self._lock:

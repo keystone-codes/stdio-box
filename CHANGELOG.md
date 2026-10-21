@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Package version 0.2.0.
+- `creds_snapshot_tools`: takes the server's `tools/list` under the caller's own profile, stores the raw snapshot (newest five, table `tool_snapshots`), and returns its id, `sha256`, the published names, the profile, the variant, and `variant_filters_tools`. Refusal code `snapshot_invalid`.
+- `credsctl snapshot list` and `credsctl snapshot export <id>`.
+- `stdio-box box-tools` prints the names of the image's own `creds_*` tools as JSON. There are eleven.
+
 ## [0.1.0] - 2026-10-15
 
 ### Added

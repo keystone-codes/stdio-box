@@ -24,7 +24,8 @@ _USAGE = """usage: stdio-box validate-provider <provider-directory>
        stdio-box debug-spawn --slot N
        stdio-box install [--provider-dir DIR] [--cache DIR]
        stdio-box snapshot-tools [--provider-dir DIR] [--out PATH|-] [--check] [--env-file PATH]
-       stdio-box policy-example --namespace <ns> [--provider-dir DIR] [--critical <child>...]"""
+       stdio-box policy-example --namespace <ns> [--provider-dir DIR] [--critical <child>...]
+       stdio-box box-tools"""
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -64,6 +65,11 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(snapshot_main(args[1:]))
     if command == "policy-example":
         raise SystemExit(_policy_example(args[1:]))
+    if command == "box-tools":
+        if len(args) != 1:
+            print(_USAGE, file=sys.stderr)
+            raise SystemExit(2)
+        raise SystemExit(_box_tools())
     print(_USAGE, file=sys.stderr)
     raise SystemExit(2)
 
@@ -311,6 +317,14 @@ def _policy_example(argv: list[str]) -> int:
 _POLICY_USAGE = (
     "usage: stdio-box policy-example --namespace <ns> [--provider-dir DIR] [--critical <child>...]"
 )
+
+
+def _box_tools() -> int:
+    """Print the names of this build's own ``creds_*`` tools as one JSON array."""
+    from stdio_box.creds_tools import box_tool_names
+
+    print(json.dumps(box_tool_names()))
+    return 0
 
 
 def _validate_provider(directory: str) -> int:

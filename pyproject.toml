@@ -1,6 +1,6 @@
 [project]
 name = "stdio-box"
-version = "0.1.0"
+version = "0.2.0"
 description = "One container image that runs a third-party MCP stdio server behind Keystone."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -42,6 +42,7 @@ packages = ["src/stdio_box"]
 [tool.hatch.build.targets.wheel.force-include]
 "schemas/provider-v1.json" = "stdio_box/schemas/provider-v1.json"
 "src/stdio_box/store/migrations/0001_init.sql" = "stdio_box/store/migrations/0001_init.sql"
+"src/stdio_box/store/migrations/0002_tool_snapshots.sql" = "stdio_box/store/migrations/0002_tool_snapshots.sql"
 
 [tool.ruff]
 target-version = "py312"
