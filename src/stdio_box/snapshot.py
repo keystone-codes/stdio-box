@@ -1,5 +1,6 @@
 """Capture ``tools/list`` by installing the locked server and starting it once."""
 
+import hashlib
 import json
 import os
 import shlex
@@ -62,12 +63,7 @@ def snapshot_main(argv: list[str], environ: Mapping[str, str] | None = None) -> 
         tools = _capture(provider, provider_dir, settings, command, discovery)
     except (BoxCommandError, ProviderError, InstallFailed, ConfigError) as exc:
         return _failure(exc)
-    snapshot = {
-        "schema_version": 1,
-        "server": {"command": provider.server.command},
-        "taken_at": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-        "tools": tools,
-    }
+    snapshot = build_snapshot(provider, tools)
     if flags.out is not None:
         _write_snapshot(snapshot, flags.out)
     if flags.check:
@@ -75,6 +71,39 @@ def snapshot_main(argv: list[str], environ: Mapping[str, str] | None = None) -> 
     if flags.out is None:
         _write_snapshot(snapshot, "-")
     return 0
+
+
+def build_snapshot(provider: Provider, tools: list[dict]) -> dict:
+    """The snapshot document: ``tools`` as the server listed them, no rules applied."""
+    return {
+        "schema_version": 1,
+        "server": {"command": provider.server.command},
+        "taken_at": datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "tools": tools,
+    }
+
+
+def render_snapshot(snapshot: dict) -> str:
+    """The exact text ``snapshot-tools`` writes."""
+    return json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
+
+
+def snapshot_sha256(snapshot: object) -> str:
+    """SHA-256 of the canonical JSON without ``taken_at``.
+
+    Canonical is ``json.dumps(..., sort_keys=True, separators=(",", ":"),
+    ensure_ascii=False)`` encoded as UTF-8. Two snapshots of the same server
+    taken at different times have the same hash.
+    """
+    canonical = json.dumps(
+        _without_taken_at(snapshot), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def listed_tools(listed: object) -> list[dict]:
+    """``tools/list`` result as plain JSON objects, the way the snapshot stores them."""
+    return [tool.model_dump(mode="json", exclude_none=True) for tool in listed.tools]
 
 
 class _Flags:
@@ -231,7 +260,7 @@ async def _collect_tools(
                     break
             detail = first or mask_install_text(str(exc), secrets)
             raise InstallFailed(f"snapshot failed: {detail}") from None
-    return [tool.model_dump(mode="json", exclude_none=True) for tool in listed.tools]
+    return listed_tools(listed)
 
 
 @contextmanager
@@ -251,7 +280,7 @@ def _hidden_inherited_env() -> Iterator[None]:
 
 
 def _write_snapshot(snapshot: dict, out: str) -> None:
-    text = json.dumps(snapshot, indent=2, sort_keys=True) + "\n"
+    text = render_snapshot(snapshot)
     if out == "-":
         print(text, end="")
         return
