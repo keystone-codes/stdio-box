@@ -161,7 +161,7 @@ identity:
 containers:
   mcp:
     # placeholder until the stdio-box image release records the digest
-    image: "ghcr.io/keystone-codes/stdio-box:0.2.0@sha256:4d6284427d126419c0d0ffc7e7dbcff3d0b869181a3bdd56b2e1e6d5a5d742ec"
+    image: "ghcr.io/keystone-codes/stdio-box:0.1.0@sha256:4d6081cb1608c922c6c7299d30570a145187e65e4be274f9bb98aaaa7d67c519"
     port: 8081
     env:
       - name: BOX_PROVIDER
