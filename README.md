@@ -83,6 +83,38 @@ The tool must be in the profile variant's `tools` patterns (or the variant must 
 
 One package runs as one box container. Inside it, the wrapper starts one copy of the provider's server per profile, so each account of the external system has its own process. The path of one call, with three profiles of the `atlassian` box:
 
+```mermaid
+flowchart LR
+  person["Person<br/>signed in with Google"]
+  backend["Service svc:backend<br/>API key"]
+  rolecheck["Service svc:role-check<br/>API key, role atlassian_writer"]
+
+  door["keystone-mcp door<br/>roles, policy,<br/>signed X-Keystone-Identity"]
+
+  subgraph box["atlassian-mcp container, one per package"]
+    wrapper["box wrapper<br/>picks a profile:<br/>user → role → default"]
+    p1["atlassian/alexey<br/>own process, uid 20000+slot"]
+    p2["atlassian/backend<br/>own process, uid 20000+slot"]
+    p3["atlassian/skynet<br/>own process, uid 20000+slot"]
+  end
+
+  jiraA["Jira a.example.com"]
+  jiraB["Jira b.example.com"]
+
+  person --> door
+  backend --> door
+  rolecheck --> door
+  door --> wrapper
+  wrapper -- "user:alexey@example.com" --> p1
+  wrapper -- "user:svc:backend" --> p2
+  wrapper -- "role:atlassian_writer, position 1" --> p3
+  p1 --> jiraA
+  p2 --> jiraB
+  p3 --> jiraB
+```
+
+The same path as text, for a terminal:
+
 ```
 MCP client            an agent signed in at the door, or a service with its own service account
    │  MCP over HTTPS
