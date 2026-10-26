@@ -1,5 +1,5 @@
 # Vendored unchanged from keystone-codes/keystone-mcp
-# commit 6b04a198101dac22815b17d5bcf55b0e1c6463d8
+# commit f73310df8634a19406bf21972e023af9a3b44ac0
 # path examples/keystone-identity/python/keystone_identity.py
 
 """Reference verifier for Keystone-MCP's signed identity assertion.

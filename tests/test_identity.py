@@ -38,7 +38,7 @@ def _rejected(
 
 def test_vendor_file_is_the_pinned_source() -> None:
     text = VENDOR_PATH.read_text(encoding="utf-8")
-    assert "6b04a198101dac22815b17d5bcf55b0e1c6463d8" in text
+    assert "f73310df8634a19406bf21972e023af9a3b44ac0" in text
     body = text[text.index('"""Reference verifier') :]
     assert hashlib.sha256(body.encode()).hexdigest() == VENDOR_BODY_SHA256
 
