@@ -45,15 +45,21 @@ _SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
 }
 _INVALID = "This link is not valid. Ask the administrator for a new one."
-_REJECTED = "The form could not be accepted. Open the link again."
-_TOO_MANY = "Too many attempts. Ask the administrator for a new link."
 _TOO_FAST = "Too many submissions. Wait a minute and try again."
 _PAGE = (
     '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
     "<title>Credential entry</title>"
     "<style>body{{font-family:sans-serif;max-width:36rem;margin:2rem auto;padding:0 1rem}}"
-    "label{{display:block;margin:1rem 0}}input{{width:100%;box-sizing:border-box}}</style>"
+    "label{{display:block;margin:1rem 0}}input{{width:100%;box-sizing:border-box}}"
+    ".error{{border:2px solid #b00020;background:#fdeaea;color:#4a0000;"
+    "padding:0.75rem 1rem;margin:1rem 0;border-radius:4px}}"
+    ".error p{{margin:0.4rem 0}}</style>"
     "</head><body>{body}</body></html>"
+)
+_REJECTED_EXPLANATION = (
+    "The browser sent the form in a way this page does not accept (blocked cookies, "
+    "an old copy of the page, or a different address). Open the link again from the "
+    "original message."
 )
 
 
@@ -166,20 +172,20 @@ class _Creds:
         if profile is None or variant is None or self._store is None:
             return _page(_INVALID, 404)
         if not _origin_ok(request, self._config):
-            return _page(_REJECTED, 400)
+            return _page(_error_block([_REJECTED_EXPLANATION]), 400)
         nonce = request.cookies.get("__Host-box_form", "")
         if not nonce:
-            return _page(_REJECTED, 400)
+            return _page(_error_block([_REJECTED_EXPLANATION]), 400)
         submitted = await _read_form(request)
         if submitted is None:
-            return _page(_REJECTED, 400)
+            return _page(_error_block([_REJECTED_EXPLANATION]), 400)
         csrf = submitted.get("csrf", "")
         expected = await self._csrf(token, nonce)
         if not _same(expected, csrf):
-            return _page(_REJECTED, 400)
+            return _page(_error_block([_REJECTED_EXPLANATION]), 400)
         secrets = _secret_values(submitted, variant, self._fields)
         if secrets is None:
-            return _page(_REJECTED, 400)
+            return _page(_error_block([_REJECTED_EXPLANATION]), 400)
         if not self._limiter.allow():
             return _page(_TOO_FAST, 429)
         values = _check_values(profile, link, variant, self._fields, secrets)
@@ -216,10 +222,17 @@ class _Creds:
             return _page(_INVALID, 404)
         await self._audit(token, link, profile.id, "rejected", attempts)
         self._submitted("rejected")
+        lines = _failure_lines(variant, result)
         if attempts >= 5:
-            return _page(_TOO_MANY, 410)
+            lines.append(
+                "This link is used up: five failed checks is the limit for one link. "
+                "Ask the administrator for a new link."
+            )
+            return _page(_error_block(lines), 410)
+        remaining = max(0, 5 - attempts)
+        lines.append(f"Attempts left on this link: {remaining}.")
         csrf = await self._csrf(token, nonce)
-        notice = _failure_notice(variant, result)
+        notice = _error_block(lines)
         body = _form_body(
             self._provider,
             variant,
@@ -361,7 +374,7 @@ def _form_body(
         f"<p>Profile {escape(profile.id)}</p>",
     ]
     if notice:
-        parts.append(f"<p>{escape(notice)}</p>")
+        parts.append(notice)
     shown = _public_values(profile, link, variant, fields)
     readonly = []
     for name in variant.fields:
@@ -399,15 +412,91 @@ def _form_body(
     return "".join(parts)
 
 
-def _failure_notice(variant: Variant, result: CheckResult) -> str:
-    title = variant_title(variant)
-    status = next(
-        (item["http_status"] for item in result.results if item["ok"] is False),
-        None,
+def _error_block(lines: list[str]) -> str:
+    """A prominent, styled error block for the top of a rejected form or page.
+
+    Every dynamic value folded into ``lines`` by the caller is plain text built from
+    public fields, check kinds/names, and status codes -- never a secret value or a
+    response body -- but it is still escaped here before going into the page.
+    """
+    items = "".join(f"<p>{escape(line)}</p>" for line in lines)
+    return (
+        f'<div class="error" role="alert"><p><strong>Nothing was saved.</strong></p>{items}</div>'
     )
-    if isinstance(status, int):
-        return f"{title} did not accept these values (HTTP {status})."
-    return f"{title} did not accept these values."
+
+
+def _failure_lines(variant: Variant, result: CheckResult) -> list[str]:
+    """Which check failed, and a human explanation of why, as plain text lines."""
+    title = variant_title(variant)
+    located = _locate_failure(variant, result)
+    if located is None:
+        return [f"{title} did not accept these values."]
+    position, total, kind, what, status = located
+    return [
+        _which_check_line(position, total, kind, what, status),
+        _explain_status(title, kind, status),
+    ]
+
+
+def _locate_failure(
+    variant: Variant, result: CheckResult
+) -> tuple[int, int, str, str, int | None] | None:
+    failing = next((item for item in result.results if item["ok"] is False), None)
+    if failing is None:
+        return None
+    total = len(variant.checks)
+    index = failing["index"]
+    assert isinstance(index, int)
+    kind = str(failing["kind"])
+    target = failing.get("target")
+    status = failing.get("http_status")
+    status_int = status if isinstance(status, int) else None
+    if kind == "http" and isinstance(target, str) and target:
+        what = target
+    elif isinstance(target, str) and target:
+        what = f"tool call {target}"
+    else:
+        what = "this check"
+    return index, total, kind, what, status_int
+
+
+def _which_check_line(position: int, total: int, kind: str, what: str, status: int | None) -> str:
+    prefix = f"Check {position + 1} of {total} failed: "
+    if status is not None:
+        return f"{prefix}{what} answered HTTP {status}."
+    if kind == "http":
+        return f"{prefix}{what} was refused."
+    return f"{prefix}{what} did not accept these values."
+
+
+def _explain_status(title: str, kind: str, status: int | None) -> str:
+    if status == 401:
+        return (
+            "The address answered, but it did not accept this account and secret. Check "
+            "that the token belongs to the account shown above, was copied in full, and "
+            "has not been revoked; some providers issue limited, scoped tokens that do "
+            "not work against the site address."
+        )
+    if status == 403:
+        return (
+            "The account and secret were accepted, but this account has no access there. "
+            "Ask the site administrator for access, or ask for a profile that does not "
+            "include that product."
+        )
+    if status == 404:
+        return (
+            "There was nothing at this address. The address may be wrong, or that "
+            "product may not be on this site; ask the administrator to check the address."
+        )
+    if status == 429:
+        return "The service is limiting requests. Wait a minute before trying again."
+    if status is not None and 500 <= status <= 599:
+        return "The service had an error. Try again later."
+    if status is None:
+        if kind == "http":
+            return "The box could not reach the address. Ask the administrator."
+        return "Check that the account and secret are correct, then try again."
+    return f"{title} did not accept these values (HTTP {status})."
 
 
 def _public_values(

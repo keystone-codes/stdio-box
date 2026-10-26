@@ -233,7 +233,13 @@ async def test_post_requires_origin_cookie_csrf(tmp_path: Path) -> None:
         )
     for response in (missing_origin, foreign, no_cookie, bad_csrf):
         assert response.status_code == 400
-        assert "The form could not be accepted. Open the link again." in response.text
+        assert '<div class="error" role="alert">' in response.text
+        assert "<strong>Nothing was saved.</strong>" in response.text
+        assert (
+            "The browser sent the form in a way this page does not accept (blocked "
+            "cookies, an old copy of the page, or a different address). Open the link "
+            "again from the original message." in response.text
+        )
     with pytest.raises(SecretUnreadable):
         store.read_secrets(profile_id)
     store.close()
@@ -330,17 +336,116 @@ async def test_failed_check_keeps_old_values(tmp_path: Path) -> None:
         async with _client(app) as client:
             nonce, csrf = await _form(client, token)
             statuses = []
-            for _ in range(4):
+            for remaining in (4, 3, 2, 1):
                 response = await _submit(client, token, nonce, csrf)
                 statuses.append(response.status_code)
-                assert "did not accept these values (HTTP 401)." in response.text
+                assert '<div class="error" role="alert">' in response.text
+                assert "<strong>Nothing was saved.</strong>" in response.text
+                assert "Check 1 of 1 failed: https://echo.example/who answered HTTP 401." in (
+                    response.text
+                )
+                assert "the token belongs to the account shown above" in response.text
+                assert f"Attempts left on this link: {remaining}." in response.text
                 assert store.read_secrets(profile_id) == {"ECHO_TOKEN": OLD_VALUE}
             last = await _submit(client, token, nonce, csrf)
     assert statuses == [422, 422, 422, 422]
     assert last.status_code == 410
-    assert "Too many attempts. Ask the administrator for a new link." in last.text
+    assert '<div class="error" role="alert">' in last.text
+    assert "<strong>Nothing was saved.</strong>" in last.text
+    assert "Check 1 of 1 failed: https://echo.example/who answered HTTP 401." in last.text
+    assert "the token belongs to the account shown above" in last.text
+    assert (
+        "This link is used up: five failed checks is the limit for one link. "
+        "Ask the administrator for a new link." in last.text
+    )
     assert store.read_secrets(profile_id) == {"ECHO_TOKEN": OLD_VALUE}
     assert store.get_profile(profile_id).version == 1
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_which_check_failed_names_the_second_check_without_a_secret(
+    tmp_path: Path,
+) -> None:
+    provider = _provider()
+    store = _open_store(tmp_path, provider)
+    profile_id = _profile(store, provider, variant="two")
+    token = store.create_link(profile_id, "create", 900, "test")
+    app = _app(tmp_path, store, provider)
+    also_secret = "second-check-secret-value"
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/also":
+            return httpx.Response(401)
+        return httpx.Response(200, json={"name": "Ada"})
+
+    with respx.mock(assert_all_called=True) as mock:
+        mock.route().mock(side_effect=respond)
+        async with _client(app) as client:
+            opened = await client.get(f"/creds/{token}")
+            nonce, csrf = _nonce(opened), _csrf(opened.text)
+            client.cookies.clear()
+            rejected = await _submit(
+                client,
+                token,
+                nonce,
+                csrf,
+                fields={"csrf": csrf, "ECHO_TOKEN": TOKEN_VALUE, "ECHO_ALSO": also_secret},
+            )
+    assert rejected.status_code == 422
+    assert "Check 2 of 2 failed: https://second.example/also answered HTTP 401." in rejected.text
+    assert also_secret not in rejected.text
+    assert TOKEN_VALUE not in rejected.text
+    store.close()
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (403, "this account has no access there"),
+        (404, "There was nothing at this address"),
+        (429, "The service is limiting requests."),
+        (503, "The service had an error. Try again later."),
+    ],
+)
+@pytest.mark.asyncio
+async def test_explanation_by_status_class(tmp_path: Path, status: int, expected: str) -> None:
+    provider = _provider()
+    store = _open_store(tmp_path, provider)
+    profile_id = _profile(store, provider)
+    token = store.create_link(profile_id, "create", 900, "test")
+    app = _app(tmp_path, store, provider)
+    with respx.mock(assert_all_called=True) as mock:
+        mock.route().mock(return_value=httpx.Response(status))
+        async with _client(app) as client:
+            nonce, csrf = await _form(client, token)
+            rejected = await _submit(client, token, nonce, csrf)
+    assert rejected.status_code == 422
+    assert f"answered HTTP {status}." in rejected.text
+    assert expected in rejected.text
+    store.close()
+
+
+@pytest.mark.asyncio
+async def test_explanation_when_the_url_is_refused_by_policy(tmp_path: Path) -> None:
+    provider = _provider()
+    store = _open_store(tmp_path, provider)
+    profile_id = _profile(
+        store,
+        provider,
+        public={"ECHO_URL": "https://not-allowed.invalid", "ECHO_ORG": "acme"},
+    )
+    token = store.create_link(profile_id, "create", 900, "test")
+    app = _app(tmp_path, store, provider)
+    with respx.mock(assert_all_called=False) as mock:
+        mock.route().mock(return_value=httpx.Response(200, json={"name": "Ada"}))
+        async with _client(app) as client:
+            nonce, csrf = await _form(client, token)
+            rejected = await _submit(client, token, nonce, csrf)
+    assert rejected.status_code == 422
+    assert "was refused" in rejected.text
+    assert "The box could not reach the address. Ask the administrator." in rejected.text
+    assert len(mock.calls) == 0
     store.close()
 
 

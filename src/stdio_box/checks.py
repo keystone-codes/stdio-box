@@ -40,6 +40,7 @@ class _One:
     http_status: int | None
     identity: str | None
     detail: str
+    target: str | None = None
 
 
 class _TemplateError(Exception):
@@ -75,7 +76,15 @@ async def run_checks(
     results: list[dict[str, object]] = []
     for index, check in enumerate(variant.checks):
         one = await _run_check(check, provider, variant, fields, values, policy, title, instances)
-        results.append({"kind": one.kind, "ok": one.ok, "http_status": one.http_status})
+        results.append(
+            {
+                "index": index,
+                "kind": one.kind,
+                "ok": one.ok,
+                "http_status": one.http_status,
+                "target": one.target,
+            }
+        )
         if index == 0:
             identity = one.identity
         if one.ok is False:
@@ -115,23 +124,26 @@ async def _run_tool(
     tool = check.tool
     start = getattr(instances, "start_ephemeral", None)
     if tool is None or start is None:
-        return _One("tool", None, None, None, _NO_SLOT)
+        return _One("tool", None, None, None, _NO_SLOT, target=None if tool is None else tool.name)
+    target = tool.name
     arguments = {} if tool.arguments is None else dict(tool.arguments)
     timeout = _timeout(tool.timeout_seconds)
     try:
         async with start(provider, variant, values) as session:
             if session is None:
-                return _One("tool", None, None, None, _NO_SLOT)
+                return _One("tool", None, None, None, _NO_SLOT, target=target)
             result = await session.call_tool(
                 tool.name,
                 arguments,
                 read_timeout_seconds=timedelta(seconds=timeout),
             )
     except Exception:
-        return _One("tool", None, None, None, _unreachable(title))
+        return _One("tool", None, None, None, _unreachable(title), target=target)
     if result.isError:
-        return _One("tool", False, None, None, f"{title} did not accept these values.")
-    return _One("tool", True, None, _tool_identity(result), "")
+        return _One(
+            "tool", False, None, None, f"{title} did not accept these values.", target=target
+        )
+    return _One("tool", True, None, _tool_identity(result), "", target=target)
 
 
 def _tool_identity(result: object) -> str | None:
@@ -160,10 +172,13 @@ async def _run_http(
         }
         auth, auth_headers = _auth(http.auth, values)
     except _TemplateError:
-        return _One("http", False, None, None, _refused(title, http.url))
+        return _One(
+            "http", False, None, None, _refused(title, http.url), target=_display_url(http.url)
+        )
+    display = _display_url(url)
     pinned = classify_url(url, variant, policy)
     if isinstance(pinned, UrlRefused):
-        return _One("http", False, None, None, _refused(title, url))
+        return _One("http", False, None, None, _refused(title, url), target=display)
     headers["Host"] = pinned.host_header
     headers.update(auth_headers)
     timeout = _timeout(http.timeout_seconds)
@@ -181,12 +196,12 @@ async def _run_http(
         ) as client:
             response = await client.request(http.method, pinned.request_url, **request_args)
     except httpx.HTTPError:
-        return _One("http", None, None, None, _unreachable(title))
+        return _One("http", None, None, None, _unreachable(title), target=display)
     status = response.status_code
     identity = _identity(response.content, http.identity)
     if status not in http.expect_status:
-        return _One("http", False, status, identity, _answered(title, url, status))
-    return _One("http", True, status, identity, "")
+        return _One("http", False, status, identity, _answered(title, url, status), target=display)
+    return _One("http", True, status, identity, "", target=display)
 
 
 def _auth(
@@ -271,6 +286,20 @@ def _host_and_path(url: str) -> str:
     if parsed.port is not None:
         host = f"{host}:{parsed.port}"
     return f"{host}{parsed.path}"
+
+
+def _display_url(url: str) -> str:
+    """The URL with only public fields filled in, no query string, no secret can appear here.
+
+    ``url`` is either a filled template (``_substitute`` already refuses to put a secret
+    field into a URL) or the raw template string (unfilled placeholders, also no secret
+    value). Dropping the query string and fragment is an extra guard in case a public
+    field ever carried one.
+    """
+    parsed = urlsplit(url)
+    if not parsed.scheme:
+        return url
+    return f"{parsed.scheme}://{_host_and_path(url)}"
 
 
 def _answered(title: str, url: str, status: int) -> str:

@@ -133,8 +133,13 @@ async def test_second_rejected_check_fails_the_variant() -> None:
     assert result.ok is False
     assert "second.example" in result.detail
     assert result.results[0]["ok"] is True
+    assert result.results[0]["index"] == 0
     assert result.results[1]["ok"] is False
     assert result.results[1]["http_status"] == 403
+    assert result.results[1]["index"] == 1
+    assert result.results[1]["target"] == "https://second.example/also"
+    assert ALSO not in str(result.results[1]["target"])
+    assert TOKEN not in str(result.results[1]["target"])
 
 
 @pytest.mark.asyncio
@@ -171,6 +176,17 @@ async def test_https_is_required_unless_allowed() -> None:
         assert refused.ok is False
         assert len(mock.calls) == 1
         assert allowed.ok is True
+
+
+@pytest.mark.asyncio
+async def test_a_secret_field_in_the_url_template_never_reaches_the_result() -> None:
+    provider, variant = _one(_http(url="{ECHO_URL}/who?token={ECHO_TOKEN}"))
+    result = await run_checks(provider, variant, VALUES, instances=None, config=UrlPolicy())
+    assert result.ok is False
+    target = result.results[0]["target"]
+    assert target is not None
+    assert TOKEN not in str(target)
+    assert "{ECHO_TOKEN}" in str(target)
 
 
 @pytest.mark.asyncio

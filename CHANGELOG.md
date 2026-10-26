@@ -9,6 +9,10 @@
 - `credsctl snapshot list` and `credsctl snapshot export <id>`.
 - `stdio-box box-tools` prints the names of the image's own `creds_*` tools as JSON. There are eleven.
 
+### Changed
+
+- The `/creds/<token>` form now shows a prominent error block on a failed check: which check failed and what it called (no secret, no response body), a plain-language explanation keyed to the HTTP status class (401/403/404/429/5xx), and how many attempts are left on the link. The 410 (link used up) and 400 (form rejected before the check) pages get the same styling, with text that says plainly that nothing was saved.
+
 ## [0.1.0] - 2026-10-15
 
 ### Added
