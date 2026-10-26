@@ -371,6 +371,32 @@ async def test_unreachable_check_saves(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_form_page_is_self_contained(tmp_path: Path) -> None:
+    provider = _provider()
+    store = _open_store(tmp_path, provider)
+    profile_id = _profile(store, provider)
+    token = store.create_link(profile_id, "create", 900, "test")
+    app = _app(tmp_path, store, provider)
+    async with _client(app) as client:
+        opened = await client.get(f"/creds/{token}")
+    html = opened.text
+    lowered = html.lower()
+    assert opened.status_code == 200
+    assert "<script" not in lowered
+    assert "<link" not in lowered
+    assert "url(" not in lowered
+    assert "@import" not in lowered
+    assert 'src="' not in lowered
+    assert "<h1>Echo HTTP</h1>" in html
+    assert "Token for this account" in html
+    assert 'value="https://echo.example"' in html
+    assert 'type="password"' in html
+    assert 'autocomplete="off"' in html
+    assert 'name="ECHO_TOKEN"' in html
+    store.close()
+
+
+@pytest.mark.asyncio
 async def test_headers(tmp_path: Path) -> None:
     provider = _provider()
     store = _open_store(tmp_path, provider)

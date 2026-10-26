@@ -25,6 +25,7 @@ from starlette.routing import Route
 
 from stdio_box.checks import CheckResult, run_checks, variant_title
 from stdio_box.config import Config
+from stdio_box.form_page import render_form, render_message, render_page
 from stdio_box.provider import Field, Provider, Variant
 from stdio_box.store.errors import LinkNotFound
 from stdio_box.store.repo import FormLink, Profile, Store
@@ -48,13 +49,6 @@ _INVALID = "This link is not valid. Ask the administrator for a new one."
 _REJECTED = "The form could not be accepted. Open the link again."
 _TOO_MANY = "Too many attempts. Ask the administrator for a new link."
 _TOO_FAST = "Too many submissions. Wait a minute and try again."
-_PAGE = (
-    '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
-    "<title>Credential entry</title>"
-    "<style>body{{font-family:sans-serif;max-width:36rem;margin:2rem auto;padding:0 1rem}}"
-    "label{{display:block;margin:1rem 0}}input{{width:100%;box-sizing:border-box}}</style>"
-    "</head><body>{body}</body></html>"
-)
 
 
 class _Limiter:
@@ -155,7 +149,7 @@ class _Creds:
             self._fields,
         )
         self._issued()
-        return _page(body, 200, nonce=nonce)
+        return _page(body, 200, nonce=nonce, title=self._provider.title)
 
     async def _post(self, request: Request, token: str) -> Response:
         link = await self._peek(token)
@@ -230,7 +224,7 @@ class _Creds:
             self._fields,
             notice=notice,
         )
-        return _page(body, 422)
+        return _page(body, 422, title=self._provider.title)
 
     async def _save(
         self,
@@ -323,13 +317,21 @@ class _Creds:
         )
 
 
-def _page(text: str, status: int, *, nonce: str | None = None) -> HTMLResponse:
+def _page(
+    text: str, status: int, *, nonce: str | None = None, title: str | None = None
+) -> HTMLResponse:
     if text.startswith("<"):
         body = text
+        tone = "tone-entry"
+        page_title = title or "Credential entry"
     else:
-        body = f"<p>{text}</p>"
+        body = render_message(text)
+        tone = "tone-done" if status == 200 else "tone-stop"
+        page_title = title or ("Saved" if status == 200 else "Credential entry")
     response = HTMLResponse(
-        _PAGE.format(body=body), status_code=status, headers=dict(_SECURITY_HEADERS)
+        render_page(body, title=page_title, tone=tone),
+        status_code=status,
+        headers=dict(_SECURITY_HEADERS),
     )
     if nonce is not None:
         response.set_cookie(
@@ -354,49 +356,26 @@ def _form_body(
     *,
     notice: str | None = None,
 ) -> str:
-    title = variant_title(variant)
-    parts = [
-        f"<h1>{escape(provider.title)}</h1>",
-        f"<p>{escape(title)}</p>",
-        f"<p>Profile {escape(profile.id)}</p>",
-    ]
-    if notice:
-        parts.append(f"<p>{escape(notice)}</p>")
     shown = _public_values(profile, link, variant, fields)
-    readonly = []
+    readonly: list[tuple[str, str, str]] = []
+    secrets: list[tuple[str, str, int]] = []
     for name in variant.fields:
         field = fields[name]
         if field.secret:
-            continue
-        readonly.append(
-            "<label>"
-            f"{escape(name)}"
-            f'<input type="text" value="{escape(shown.get(name, ""))}" readonly>'
-            "</label>"
-            f"<p>{escape(field.hint)}</p>"
-        )
-    secrets = []
-    for name in variant.fields:
-        field = fields[name]
-        if not field.secret:
-            continue
-        secrets.append(
-            "<label>"
-            f"{escape(name)}"
-            f'<input type="password" name="{escape(name)}" autocomplete="off" '
-            'spellcheck="false" required>'
-            "</label>"
-            f"<p>{escape(field.hint)}</p>"
-        )
-    action = escape(f"/creds/{token}")
-    parts.append(
-        f'<form method="post" action="{action}">'
-        f'<input type="hidden" name="csrf" value="{escape(csrf)}">'
-        + "".join(readonly)
-        + "".join(secrets)
-        + '<button type="submit">Save</button></form>'
+            secrets.append((name, field.hint, field.max_length))
+        else:
+            readonly.append((name, shown.get(name, ""), field.hint))
+    return render_form(
+        provider_title=provider.title,
+        variant_title=variant_title(variant),
+        profile_id=profile.id,
+        purpose=link.purpose,
+        token=token,
+        csrf=csrf,
+        readonly=readonly,
+        secrets=secrets,
+        notice=notice,
     )
-    return "".join(parts)
 
 
 def _failure_notice(variant: Variant, result: CheckResult) -> str:

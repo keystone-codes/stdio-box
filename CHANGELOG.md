@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- The one-time secret page at `/creds/<token>` is set in type, with the account and its already-known fields set apart from the secret inputs. The page still has no script and no external resources.
+
 ### Added
 
 - Package version 0.2.0.
