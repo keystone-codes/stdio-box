@@ -39,6 +39,8 @@ _CHANGING = [
     "echo_creds_profile_delete",
     "echo_creds_bind",
     "echo_creds_unbind",
+    "echo_creds_desired_set",
+    "echo_creds_sync",
 ]
 
 
@@ -51,7 +53,7 @@ def public_dns(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_input_schemas() -> None:
-    assert len(TOOLS) == 11
+    assert len(TOOLS) == 14
     for tool in TOOLS:
         Draft202012Validator.check_schema(tool.inputSchema)
 

@@ -14,6 +14,6 @@ roles:
   notion_box_admin:
     description: "Manage accounts and bindings in the notion box."
     allow: ["notion_creds_*"]
-critical_tools: [notion_creds_profile_create, notion_creds_profile_rotate, notion_creds_profile_delete, notion_creds_bind, notion_creds_unbind, notion_post_search, notion_patch_block_children, notion_update_a_block, notion_delete_a_block, notion_patch_page, notion_post_page, notion_create_a_comment, notion_query_data_source, notion_update_a_data_source, notion_create_a_data_source, notion_move_page, notion_update_page_markdown]
+critical_tools: [notion_creds_profile_create, notion_creds_profile_rotate, notion_creds_profile_delete, notion_creds_bind, notion_creds_unbind, notion_creds_desired_set, notion_creds_sync, notion_post_search, notion_patch_block_children, notion_update_a_block, notion_delete_a_block, notion_patch_page, notion_post_page, notion_create_a_comment, notion_query_data_source, notion_update_a_data_source, notion_create_a_data_source, notion_move_page, notion_update_page_markdown]
 # Only a signed-in person may change accounts; API keys and service accounts may not.
-requires_human_identity: [notion_creds_profile_create, notion_creds_profile_rotate, notion_creds_profile_delete, notion_creds_bind, notion_creds_unbind]
+requires_human_identity: [notion_creds_profile_create, notion_creds_profile_rotate, notion_creds_profile_delete, notion_creds_bind, notion_creds_unbind, notion_creds_desired_set, notion_creds_sync]

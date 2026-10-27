@@ -1,11 +1,18 @@
 """Credential tools and the sample policy printed by ``stdio-box policy-example``.
 
 ``creds_whoami`` is rendered by the call router. The handlers here are the other
-ten tools. The box does not check roles.
+tools. The box does not check roles.
+
+``creds_desired_set`` stores a version of the profile set in the ``credsctl
+sync`` format, without secrets. ``creds_sync`` shows the plan for the newest
+version with a confirm code, and applies it only when called again with that
+code. The code is an HMAC over the set's version, ``prune``, and every profile
+and binding in the box, so any change in between makes it stale.
 """
 
 import fnmatch
 import hashlib
+import hmac
 import json
 import logging
 import re
@@ -21,12 +28,25 @@ from stdio_box._vendor.keystone_identity import KeystoneIdentity
 from stdio_box.catalog import Catalog, CatalogError, build_catalog
 from stdio_box.checks import run_checks
 from stdio_box.config import Config
+from stdio_box.desired import (
+    SYNC_MARK,
+    DesiredError,
+    DesiredSet,
+    WantedProfile,
+    check_binding_targets,
+    current_bindings,
+    not_in_set,
+    parse_desired,
+    sync_bindings,
+)
 from stdio_box.instances import InstanceManager, exhausted_refusal
 from stdio_box.provider import Provider, Variant
 from stdio_box.refusals import (
     BINDING_EXISTS,
     BINDING_NOT_FOUND,
     CHECK_FAILED,
+    DESIRED_INVALID,
+    DESIRED_NOT_FOUND,
     FORM_UNAVAILABLE,
     INSTANCE_FAILED,
     INVALID_ARGUMENT,
@@ -38,6 +58,7 @@ from stdio_box.refusals import (
     SECRET_FIELD_IN_CHAT,
     SECRET_REENTRY_REQUIRED,
     SNAPSHOT_INVALID,
+    SYNC_PLAN_STALE,
     UNKNOWN_PROVIDER,
     UPSTREAM_TIMEOUT,
     Refusal,
@@ -53,7 +74,7 @@ from stdio_box.store.errors import (
     ProfileNotFound,
     SecretUnreadable,
 )
-from stdio_box.store.repo import Profile, Store, normalize_subject
+from stdio_box.store.repo import DesiredVersion, Profile, Store, normalize_subject
 from stdio_box.url_policy import UrlPolicy, check_url
 
 _LOG = logging.getLogger("stdio_box.creds")
@@ -74,7 +95,13 @@ _CHANGING = (
     "creds_profile_delete",
     "creds_bind",
     "creds_unbind",
+    "creds_desired_set",
+    "creds_sync",
 )
+_DESIRED_MAX_BYTES = 256 * 1024
+_DESIRED_LISTED = 20
+_CODE_CHARS = 20
+_SYNC_CHANGES = {"created", "updated", "secrets_requested", "deleted"}
 
 _Handler = Callable[..., Awaitable[types.CallToolResult]]
 
@@ -192,6 +219,43 @@ TOOLS: list[types.Tool] = [
         ),
         inputSchema=_EMPTY,
         annotations=types.ToolAnnotations(readOnlyHint=True, openWorldHint=True),
+    ),
+    types.Tool(
+        name="creds_desired_get",
+        description=(
+            "Show the stored profile set: its version, who wrote it and when, its text, "
+            "and the recent versions."
+        ),
+        inputSchema=_object({"version": {"type": "integer", "minimum": 1}}),
+        annotations=types.ToolAnnotations(readOnlyHint=True),
+    ),
+    types.Tool(
+        name="creds_desired_set",
+        description=(
+            "Store a new version of the profile set, in the credsctl sync YAML format "
+            "without secrets, or restore an older version with from_version. The whole "
+            "set is checked first. Nothing is applied: call creds_sync for that."
+        ),
+        inputSchema=_object(
+            {
+                "text": {"type": "string", "minLength": 1, "maxLength": _DESIRED_MAX_BYTES},
+                "from_version": {"type": "integer", "minimum": 1},
+            }
+        ),
+    ),
+    types.Tool(
+        name="creds_sync",
+        description=(
+            "Apply the stored profile set. Without confirm it only returns the plan and a "
+            "confirm code; call it again with that code to apply. A profile that needs a "
+            "secret gets a one-time form link."
+        ),
+        inputSchema=_object(
+            {
+                "prune": {"type": "boolean", "default": False},
+                "confirm": {"type": "string", "minLength": 1, "maxLength": 64},
+            }
+        ),
     ),
 ]
 
@@ -1128,6 +1192,648 @@ async def _snapshot_audit(
     return _ok(payload)
 
 
+async def _desired_get(
+    provider: Provider,
+    identity: KeystoneIdentity,
+    arguments: dict[str, Any],
+    deps: CredsDeps | None = None,
+) -> types.CallToolResult:
+    if deps is None:
+        return _not_ready()
+    tool = "creds_desired_get"
+    arguments = arguments or {}
+    refused = _only_keys(arguments, {"version"})
+    if refused is not None:
+        return await _fail(deps, identity, tool, None, refused)
+    requested = None
+    if "version" in arguments:
+        requested = _position(arguments.get("version"))
+        if requested is None:
+            return await _fail(
+                deps, identity, tool, None, _invalid("version must be an integer of 1 or greater.")
+            )
+
+    def _load() -> tuple[DesiredVersion | None, list[DesiredVersion]]:
+        found = deps.store.get_desired(provider.name, requested)
+        return found, deps.store.list_desired(provider.name, _DESIRED_LISTED)
+
+    found, versions = await anyio.to_thread.run_sync(_load)
+    if found is None and requested is not None:
+        return await _fail(
+            deps, identity, tool, None, _desired_missing(requested), extra={"version": requested}
+        )
+    payload: dict[str, Any] = {
+        "latest": versions[0].version if versions else None,
+        "versions": [_desired_view(item) for item in versions],
+    }
+    if found is None:
+        payload.update(version=None, text=None, next="Store a profile set with creds_desired_set.")
+    else:
+        payload.update(_desired_view(found), text=found.body)
+    shown = None if found is None else found.version
+    return await _succeed(deps, identity, tool, None, payload, extra={"version": shown})
+
+
+async def _desired_set(
+    provider: Provider,
+    identity: KeystoneIdentity,
+    arguments: dict[str, Any],
+    deps: CredsDeps | None = None,
+) -> types.CallToolResult:
+    """Check the whole set, then store it as a new version. Nothing is applied."""
+    if deps is None:
+        return _not_ready()
+    tool = "creds_desired_set"
+    arguments = arguments or {}
+    refused = _only_keys(arguments, {"text", "from_version"})
+    if refused is not None:
+        return await _fail(deps, identity, tool, None, refused)
+    if ("text" in arguments) == ("from_version" in arguments):
+        return await _fail(
+            deps, identity, tool, None, _invalid("Pass exactly one of text and from_version.")
+        )
+    restored_from = None
+    if "from_version" in arguments:
+        restored_from = _position(arguments.get("from_version"))
+        if restored_from is None:
+            return await _fail(
+                deps,
+                identity,
+                tool,
+                None,
+                _invalid("from_version must be an integer of 1 or greater."),
+            )
+        older = await anyio.to_thread.run_sync(
+            lambda: deps.store.get_desired(provider.name, restored_from)
+        )
+        if older is None:
+            return await _fail(
+                deps,
+                identity,
+                tool,
+                None,
+                _desired_missing(restored_from),
+                extra={"restored_from": restored_from},
+            )
+        text = older.body
+    else:
+        text = arguments.get("text")
+        if not isinstance(text, str) or not text.strip():
+            return await _fail(deps, identity, tool, None, _invalid("text must be the set's YAML."))
+        if len(text.encode("utf-8")) > _DESIRED_MAX_BYTES:
+            return await _fail(
+                deps,
+                identity,
+                tool,
+                None,
+                _invalid(f"text is longer than {_DESIRED_MAX_BYTES} bytes."),
+            )
+    extra: dict[str, Any] = {"restored_from": restored_from}
+    desired, refused = _read_desired(provider, deps, text)
+    if refused is None:
+        assert desired is not None
+        existing = await anyio.to_thread.run_sync(
+            lambda: {profile.id for profile in deps.store.list_profiles(provider.name)}
+        )
+        refused = _binding_targets(desired, existing)
+    if refused is not None:
+        return await _fail(deps, identity, tool, None, refused, extra=extra)
+    assert desired is not None
+    latest = await anyio.to_thread.run_sync(lambda: deps.store.get_desired(provider.name))
+    if latest is not None and latest.body == text:
+        payload = {**_desired_view(latest), "unchanged": True, "next": _SYNC_NEXT}
+        return await _succeed(
+            deps, identity, tool, None, payload, extra={**extra, "version": latest.version}
+        )
+    stored = await anyio.to_thread.run_sync(
+        lambda: deps.store.put_desired(
+            provider.name, text, identity.sub, restored_from=restored_from
+        )
+    )
+    payload = {
+        **_desired_view(stored),
+        "unchanged": False,
+        "profiles": sorted(desired.profiles),
+        "next": _SYNC_NEXT,
+    }
+    return await _succeed(
+        deps, identity, tool, None, payload, extra={**extra, "version": stored.version}
+    )
+
+
+_SYNC_NEXT = "Call creds_sync to see what this set would change."
+
+
+async def _sync(
+    provider: Provider,
+    identity: KeystoneIdentity,
+    arguments: dict[str, Any],
+    deps: CredsDeps | None = None,
+) -> types.CallToolResult:
+    """Plan the newest stored set; with a matching ``confirm``, apply it.
+
+    The result has the same shape either way. ``applied`` tells which it is.
+    A profile that cannot be changed is reported in ``errors`` and the rest is
+    applied, as ``credsctl sync`` does; ``partial`` is then true.
+    """
+    if deps is None:
+        return _not_ready()
+    tool = "creds_sync"
+    arguments = arguments or {}
+    refused = _only_keys(arguments, {"prune", "confirm"})
+    if refused is not None:
+        return await _fail(deps, identity, tool, None, refused)
+    prune = _optional_bool(arguments.get("prune", False))
+    if prune is None:
+        return await _fail(deps, identity, tool, None, _invalid("prune must be a boolean."))
+    confirm = arguments.get("confirm")
+    if confirm is not None and (not isinstance(confirm, str) or not confirm):
+        return await _fail(deps, identity, tool, None, _invalid("confirm must be the plan's code."))
+    stored = await anyio.to_thread.run_sync(lambda: deps.store.get_desired(provider.name))
+    if stored is None:
+        return await _fail(deps, identity, tool, None, _desired_missing(None))
+    extra: dict[str, Any] = {"version": stored.version, "prune": prune}
+    desired, refused = _read_desired(provider, deps, stored.body)
+    if refused is not None:
+        return await _fail(deps, identity, tool, None, refused, extra=extra)
+    assert desired is not None
+    plan = await anyio.to_thread.run_sync(
+        lambda: _plan(provider, deps.store, desired, stored.version, prune)
+    )
+    if isinstance(plan, Refusal):
+        return await _fail(deps, identity, tool, None, plan, extra=extra)
+    if confirm is None:
+        payload = plan.view(applied=False)
+        if plan.changes:
+            again = {"confirm": plan.code, **({"prune": True} if prune else {})}
+            payload["next"] = (
+                "Show this plan to the person who asked for it. To apply it, call "
+                f"creds_sync again with {json.dumps(again)}."
+            )
+        else:
+            payload["next"] = "Nothing to change."
+        extra.update(changes=plan.changes, confirmed=False)
+        return await _succeed(deps, identity, tool, None, payload, extra=extra)
+    if not hmac.compare_digest(confirm.encode("utf-8"), plan.code.encode("utf-8")):
+        refusal = Refusal(
+            SYNC_PLAN_STALE,
+            (
+                "The profile set or the box changed after the plan was made, or the code "
+                "is not that plan's code. Nothing was applied."
+            ),
+            "Call creds_sync without confirm for a new plan.",
+        )
+        return await _fail(deps, identity, tool, None, refusal, extra=extra)
+    if not plan.changes:
+        payload = plan.view(applied=True)
+        payload["next"] = "Nothing to change."
+        extra.update(changes=0, confirmed=True)
+        return await _succeed(deps, identity, tool, None, payload, extra=extra)
+    done = await _apply_plan(provider, identity, deps, desired, plan, prune)
+    payload = done.view(applied=True)
+    if any("form_url" in row for row in done.profiles):
+        payload["next"] = (
+            "Send each form_url to the person who owns that account. " + _NEXT + " "
+            "The profile is checked and turned on when the form is sent."
+        )
+    else:
+        payload["next"] = "Applied."
+    extra.update(changes=done.changes, confirmed=True, errors=len(done.errors))
+    return await _succeed(deps, identity, tool, None, payload, extra=extra)
+
+
+@dataclass
+class _Plan:
+    version: int
+    prune: bool
+    profiles: list[dict[str, Any]]
+    bindings: list[dict[str, Any]]
+    left: list[dict[str, Any]]
+    errors: list[dict[str, Any]]
+    code: str = ""
+
+    @property
+    def changes(self) -> int:
+        count = sum(1 for row in self.profiles if row["action"] in _SYNC_CHANGES)
+        count += sum(1 for row in self.bindings if row["action"] != "skipped")
+        count += sum(1 for row in self.left if row["action"] == "deleted")
+        return count
+
+    def view(self, *, applied: bool) -> dict[str, Any]:
+        return {
+            "version": self.version,
+            "prune": self.prune,
+            "applied": applied,
+            "partial": applied and bool(self.errors),
+            "changes": self.changes,
+            "confirm": None if applied or not self.changes else self.code,
+            "profiles": self.profiles,
+            "bindings": self.bindings,
+            "not_in_set": self.left,
+            "errors": self.errors,
+        }
+
+
+def _read_desired(
+    provider: Provider, deps: CredsDeps, text: str
+) -> tuple[DesiredSet | None, Refusal | None]:
+    try:
+        desired = parse_desired(provider, text, None, secrets=False)
+    except DesiredError as exc:
+        if exc.error_id in {"secret_reference", "secret_in_file"}:
+            return None, Refusal(
+                SECRET_FIELD_IN_CHAT,
+                exc.message,
+                "Remove every secret from the set. creds_sync sends a one-time form link "
+                "for each profile that needs one. Nothing was stored.",
+            )
+        return None, Refusal(
+            DESIRED_INVALID,
+            exc.message,
+            "Correct the set and call creds_desired_set again. Nothing was stored.",
+            data={"error": exc.error_id, **(exc.result or {})},
+        )
+    policy = _url_policy(deps.config)
+    for profile_id, wanted in desired.profiles.items():
+        refused = _check_urls(provider, wanted.variant, wanted.public, policy)
+        if refused is not None:
+            return None, Refusal(
+                DESIRED_INVALID,
+                f"profiles.{profile_id}: {refused.message}",
+                "Correct the set and call creds_desired_set again. Nothing was stored.",
+            )
+    return desired, None
+
+
+def _binding_targets(desired: DesiredSet, existing: set[str]) -> Refusal | None:
+    try:
+        check_binding_targets(desired, existing)
+    except DesiredError as exc:
+        return Refusal(
+            PROFILE_NOT_FOUND,
+            exc.message,
+            "Add the profile to the set, or create it first.",
+        )
+    return None
+
+
+def _plan(
+    provider: Provider, store: Store, desired: DesiredSet, version: int, prune: bool
+) -> "_Plan | Refusal":
+    existing = {profile.id: profile for profile in store.list_profiles(provider.name)}
+    refused = _binding_targets(desired, set(existing))
+    if refused is not None:
+        return refused
+    errors: list[dict[str, Any]] = []
+    rows = []
+    for profile_id, wanted in desired.profiles.items():
+        row = _plan_profile(provider, store, existing.get(profile_id), wanted)
+        if "error" in row:
+            errors.append(row.pop("error"))
+        rows.append(row)
+    binding_rows: list[dict[str, Any]] = []
+    final = _bindings_after(provider, store, desired, set(), binding_rows, errors, prune, True)
+    left = not_in_set(
+        store,
+        existing,
+        set(desired.profiles),
+        final,
+        errors,
+        dry_run=True,
+        prune=prune,
+        audit=_no_audit,
+    )
+    plan = _Plan(version, prune, rows, binding_rows, left, errors)
+    plan.code = store.sync_code(_box_state(provider, store, version, prune))[:_CODE_CHARS]
+    return plan
+
+
+def _plan_profile(
+    provider: Provider, store: Store, current: Profile | None, wanted: WantedProfile
+) -> dict[str, Any]:
+    """What applying would do to one profile. Nothing is written here."""
+    variant = wanted.variant
+    row: dict[str, Any] = {"profile": wanted.id, "variant": variant.name}
+    secret_fields = _secret_names(provider, variant)
+    if current is None:
+        row["action"] = "created"
+        if secret_fields:
+            row["secret_fields"] = secret_fields
+        return row
+    if current.variant != variant.name:
+        row["action"] = "skipped"
+        row["error"] = {
+            "profile": wanted.id,
+            "id": "variant_changed",
+            "message": (
+                f"the profile is {current.variant} in the box; to change the variant, "
+                "give the profile a new id"
+            ),
+        }
+        return row
+    changed = sorted(
+        name
+        for name in set(current.public_fields) | set(wanted.public)
+        if current.public_fields.get(name) != wanted.public.get(name)
+    )
+    described = wanted.description is not None and wanted.description != current.description
+    waiting = current.state in {"awaiting_secrets", "needs_reentry"} and bool(secret_fields)
+    sensitive = _changed_sensitive(provider, variant, current, wanted.public)
+    if waiting or (sensitive and secret_fields):
+        live = store.live_link_expiry(current.id)
+        if waiting and not changed and not described and live is not None:
+            row.update(action="awaiting_form", expires_at=live)
+            return row
+        row.update(action="secrets_requested", secret_fields=secret_fields)
+    elif changed or described:
+        row["action"] = "updated"
+    else:
+        row["action"] = "unchanged"
+        return row
+    if changed or described:
+        row["changed"] = changed + (["description"] if described else [])
+    return row
+
+
+def _bindings_after(
+    provider: Provider,
+    store: Store,
+    desired: DesiredSet,
+    missing: set[str],
+    rows: list[dict[str, Any]],
+    errors: list[dict[str, Any]],
+    prune: bool,
+    dry_run: bool,
+    actor: str = "",
+    audit: Callable[[str | None, dict], None] | None = None,
+) -> dict[str, str]:
+    if desired.bindings is None:
+        return current_bindings(provider, store)
+    return sync_bindings(
+        provider,
+        store,
+        desired.bindings,
+        missing,
+        rows,
+        errors,
+        dry_run=dry_run,
+        prune=prune,
+        actor=actor,
+        audit=audit or _no_audit,
+    )
+
+
+def _no_audit(_profile_id: str | None, _detail: dict) -> None:
+    return None
+
+
+def _box_state(provider: Provider, store: Store, version: int, prune: bool) -> bytes:
+    """Everything a plan depends on. Last-check times are left out."""
+    profiles = [
+        [
+            profile.id,
+            profile.variant,
+            profile.public_fields,
+            profile.description,
+            profile.managed_by,
+            profile.version,
+            profile.state,
+            store.live_link_expiry(profile.id),
+        ]
+        for profile in store.list_profiles(provider.name)
+    ]
+    found = store.bindings(provider.name)
+    bindings = {
+        "user": [[item.subject, item.profile_id] for item in found.user],
+        "role": [[item.position, item.subject, item.profile_id] for item in found.role],
+        "default": None if found.default is None else found.default.profile_id,
+    }
+    state = {"version": version, "prune": prune, "profiles": profiles, "bindings": bindings}
+    return json.dumps(state, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+async def _apply_plan(
+    provider: Provider,
+    identity: KeystoneIdentity,
+    deps: CredsDeps,
+    desired: DesiredSet,
+    plan: _Plan,
+    prune: bool,
+) -> _Plan:
+    store = deps.store
+
+    def audit(profile_id: str | None, detail: dict) -> None:
+        store.record(
+            "admin",
+            sub=identity.sub,
+            jti=identity.jti,
+            tool="creds_sync",
+            profile_id=profile_id,
+            outcome="ok",
+            detail={"command": "sync", **detail},
+        )
+
+    errors: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+    missing: set[str] = set()
+    for planned in plan.profiles:
+        wanted = desired.profiles[planned["profile"]]
+        row = await _apply_profile(provider, identity, deps, wanted, dict(planned), audit)
+        if "error" in row:
+            errors.append(row.pop("error"))
+            if planned["action"] == "created":
+                missing.add(wanted.id)
+        rows.append(row)
+
+    def _rest() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        existing = {profile.id: profile for profile in store.list_profiles(provider.name)}
+        binding_rows: list[dict[str, Any]] = []
+        final = _bindings_after(
+            provider,
+            store,
+            desired,
+            missing,
+            binding_rows,
+            errors,
+            prune,
+            False,
+            identity.sub,
+            audit,
+        )
+        left = not_in_set(
+            store,
+            existing,
+            set(desired.profiles),
+            final,
+            errors,
+            dry_run=False,
+            prune=prune,
+            audit=audit,
+        )
+        return binding_rows, left
+
+    binding_rows, left = await anyio.to_thread.run_sync(_rest)
+    for row in left:
+        if row["action"] == "deleted":
+            await deps.manager.stop_profile(row["profile"])
+    return _Plan(plan.version, prune, rows, binding_rows, left, errors)
+
+
+async def _apply_profile(
+    provider: Provider,
+    identity: KeystoneIdentity,
+    deps: CredsDeps,
+    wanted: WantedProfile,
+    row: dict[str, Any],
+    audit: Callable[[str | None, dict], None],
+) -> dict[str, Any]:
+    action = row["action"]
+    if action not in _SYNC_CHANGES:
+        return row
+    store = deps.store
+    variant = wanted.variant
+    policy = _url_policy(deps.config)
+    secret_fields = _secret_names(provider, variant)
+
+    def skipped(error_id: str, message: str) -> dict[str, Any]:
+        row["action"] = "skipped"
+        row["error"] = {"profile": wanted.id, "id": error_id, "message": message}
+        return row
+
+    if (action == "created" and secret_fields) or action == "secrets_requested":
+        if _deferred(deps.config):
+            return skipped(
+                "form_unavailable",
+                "this box has no public address yet; enter the secrets on the server "
+                f"with credsctl profile import {wanted.id} --from-file -",
+            )
+    if action == "created" and not secret_fields:
+        result = await run_checks(
+            provider, variant, wanted.public, instances=deps.manager, config=policy
+        )
+        if result.ok is False:
+            return skipped("check_failed", _check_failed(result.detail).message)
+    if action == "created":
+        try:
+            profile = await anyio.to_thread.run_sync(
+                lambda: store.create_profile(
+                    wanted.id,
+                    provider.name,
+                    variant.name,
+                    wanted.public,
+                    wanted.description,
+                    identity.sub,
+                    managed_by=SYNC_MARK,
+                )
+            )
+        except ProfileExists:
+            return skipped("profile_changed", "the profile was created by someone else during sync")
+        if not secret_fields:
+            await anyio.to_thread.run_sync(
+                lambda: _store_check(
+                    store, profile, {}, wanted.public, identity.sub, result.ok, result.identity
+                )
+            )
+            row["check"] = _check_word(result.ok)
+            await anyio.to_thread.run_sync(lambda: audit(wanted.id, {"action": "created"}))
+            return row
+        return await _send_form(deps, identity, profile, "create", None, row, audit)
+    current = await anyio.to_thread.run_sync(lambda: store.get_profile(wanted.id))
+    if current is None:
+        return skipped("profile_changed", "the profile was deleted by someone else during sync")
+    public = None if wanted.public == current.public_fields else wanted.public
+    if action == "secrets_requested":
+        purpose = "create" if current.version == 0 else "rotate"
+        await anyio.to_thread.run_sync(
+            lambda: store.set_profile_meta(
+                current.id, description=wanted.description, managed_by=SYNC_MARK
+            )
+        )
+        return await _send_form(deps, identity, current, purpose, public, row, audit)
+    if public is not None:
+        try:
+            stored = await anyio.to_thread.run_sync(lambda: store.read_secrets(current.id))
+        except SecretUnreadable:
+            return skipped("secret_unreadable", reentry_refusal(current).message)
+        result = await run_checks(
+            provider, variant, {**public, **stored}, instances=deps.manager, config=policy
+        )
+        if result.ok is False:
+            return skipped("check_failed", _check_failed(result.detail).message)
+        await anyio.to_thread.run_sync(
+            lambda: _store_check(
+                store, current, stored, public, identity.sub, result.ok, result.identity
+            )
+        )
+        row["check"] = _check_word(result.ok)
+    await anyio.to_thread.run_sync(
+        lambda: store.set_profile_meta(
+            current.id, description=wanted.description, managed_by=SYNC_MARK
+        )
+    )
+    if public is not None:
+        deps.manager.reset_failed(current.id)
+        await deps.manager.restart_profile(current.id)
+    await anyio.to_thread.run_sync(
+        lambda: audit(current.id, {"action": "updated", "changed": row.get("changed", [])})
+    )
+    return row
+
+
+async def _send_form(
+    deps: CredsDeps,
+    identity: KeystoneIdentity,
+    profile: Profile,
+    purpose: str,
+    pending: dict[str, str] | None,
+    row: dict[str, Any],
+    audit: Callable[[str | None, dict], None],
+) -> dict[str, Any]:
+    token = await anyio.to_thread.run_sync(
+        lambda: deps.store.create_link(
+            profile.id, purpose, deps.config.form_ttl_seconds, identity.sub, pending
+        )
+    )
+    link = await anyio.to_thread.run_sync(lambda: deps.store.peek_link(token))
+    row["form_url"] = f"{deps.config.public_base_url.rstrip('/')}/creds/{token}"
+    row["expires_at"] = None if link is None else link.expires_at
+    await anyio.to_thread.run_sync(
+        lambda: audit(
+            profile.id,
+            {"action": row["action"], "purpose": purpose, "link": _link_digest(token)},
+        )
+    )
+    return row
+
+
+def _check_word(ok: bool | None) -> str:
+    return "unreachable" if ok is None else "ok"
+
+
+def _desired_view(item: DesiredVersion) -> dict[str, Any]:
+    return {
+        "version": item.version,
+        "sha256": item.sha256,
+        "created_at": item.created_at,
+        "created_by": item.created_by,
+        "restored_from": item.restored_from,
+    }
+
+
+def _desired_missing(version: int | None) -> Refusal:
+    if version is None:
+        return Refusal(
+            DESIRED_NOT_FOUND,
+            "No profile set is stored in this box.",
+            "Store one with creds_desired_set.",
+        )
+    return Refusal(
+        DESIRED_NOT_FOUND,
+        f"Version {version} of the profile set was not found.",
+        "List the versions with creds_desired_get.",
+    )
+
+
 def _ok(payload: dict[str, Any]) -> types.CallToolResult:
     return types.CallToolResult(
         content=[types.TextContent(type="text", text=json.dumps(payload))],
@@ -1468,9 +2174,17 @@ async def _fail(
     *,
     subject: str | None = None,
     position: int | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> types.CallToolResult:
     await _audit(
-        deps, identity, tool, profile_id, code=refusal.code, subject=subject, position=position
+        deps,
+        identity,
+        tool,
+        profile_id,
+        code=refusal.code,
+        subject=subject,
+        position=position,
+        extra=extra,
     )
     return refusal.as_result()
 
@@ -1485,6 +2199,7 @@ async def _succeed(
     subject: str | None = None,
     position: int | None = None,
     token: str | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> types.CallToolResult:
     await _audit(
         deps,
@@ -1495,6 +2210,7 @@ async def _succeed(
         subject=subject,
         position=position,
         token=token,
+        extra=extra,
     )
     return _ok(payload)
 
@@ -1509,10 +2225,13 @@ async def _audit(
     subject: str | None,
     position: int | None,
     token: str | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> None:
     detail: dict[str, Any] = {"subject": subject, "position": position}
     if token is not None:
-        detail["link"] = hashlib.sha256(token.encode("utf-8")).hexdigest()[:8]
+        detail["link"] = _link_digest(token)
+    if extra:
+        detail.update(extra)
 
     def _write() -> None:
         deps.store.record(
@@ -1530,6 +2249,10 @@ async def _audit(
         await anyio.to_thread.run_sync(_write)
     except Exception:
         _LOG.warning("admin audit failed")
+
+
+def _link_digest(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:8]
 
 
 def _hint(tool: types.Tool, name: str) -> bool:
@@ -1579,3 +2302,6 @@ _HANDLERS["creds_bind"] = _bind
 _HANDLERS["creds_unbind"] = _unbind
 _HANDLERS["creds_check"] = _check
 _HANDLERS["creds_snapshot_tools"] = _snapshot_tools
+_HANDLERS["creds_desired_get"] = _desired_get
+_HANDLERS["creds_desired_set"] = _desired_set
+_HANDLERS["creds_sync"] = _sync

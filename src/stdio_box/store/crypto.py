@@ -16,6 +16,7 @@ INFO_PROFILE_SECRETS = "stdio-box/profile-secrets/v1"
 INFO_KEY_CHECK = "stdio-box/key-check/v1"
 INFO_FORM_CSRF = "stdio-box/form-csrf/v1"
 INFO_AUDIT_SUB = "stdio-box/audit-sub/v1"
+INFO_SYNC_CONFIRM = "stdio-box/sync-confirm/v1"
 
 _KEY_CHECK_MESSAGE = b"stdio-box key check"
 _NONCE_BYTES = 12

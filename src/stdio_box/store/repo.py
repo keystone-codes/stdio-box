@@ -27,6 +27,7 @@ from stdio_box.store.crypto import (
     INFO_AUDIT_SUB,
     INFO_FORM_CSRF,
     INFO_PROFILE_SECRETS,
+    INFO_SYNC_CONFIRM,
     derive,
     key_check,
     key_id,
@@ -127,6 +128,18 @@ class ToolSnapshot:
     profile: str
     variant: str
     subject: str
+    body: str
+
+
+@dataclass(frozen=True)
+class DesiredVersion:
+    """One stored version of the profile set. ``body`` is empty in listings."""
+
+    version: int
+    sha256: str
+    created_at: str
+    created_by: str
+    restored_from: int | None
     body: str
 
 
@@ -606,7 +619,8 @@ class Store:
         duration_ms: int | None = None,
         detail: dict | None = None,
     ) -> str | None:
-        with self._transaction():
+        """Write one audit row. This does not bump ``meta.revision``: it is not a change."""
+        with self._transaction(bump=False):
             return audit.record(
                 self._conn,
                 audit_key=self._audit_key,
@@ -743,6 +757,96 @@ class Store:
             if isinstance(loaded, dict):
                 return loaded
             return {"status": loaded}
+
+    def put_desired(
+        self,
+        provider: str,
+        body: str,
+        by: str,
+        *,
+        restored_from: int | None = None,
+    ) -> DesiredVersion:
+        """Store a new version of the profile set. This does not bump ``meta.revision``.
+
+        Nothing is applied: the set is only text until ``creds_sync`` runs it.
+        """
+        digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        with self._transaction(bump=False):
+            now = self._now()
+            cursor = self._conn.execute(
+                "INSERT INTO desired_sets (provider, body, sha256, created_at, created_by, "
+                "restored_from) VALUES (?, ?, ?, ?, ?, ?)",
+                (provider, body, digest, now, by, restored_from),
+            )
+            version = int(cursor.lastrowid)
+        return DesiredVersion(version, digest, now, by, restored_from, body)
+
+    def get_desired(self, provider: str, version: int | None = None) -> DesiredVersion | None:
+        """The given version, or the newest one."""
+        with self._lock:
+            if version is None:
+                row = self._conn.execute(
+                    "SELECT * FROM desired_sets WHERE provider = ? ORDER BY version DESC LIMIT 1",
+                    (provider,),
+                ).fetchone()
+            else:
+                row = self._conn.execute(
+                    "SELECT * FROM desired_sets WHERE provider = ? AND version = ?",
+                    (provider, version),
+                ).fetchone()
+        if row is None:
+            return None
+        return _desired_from_row(row, with_body=True)
+
+    def list_desired(self, provider: str, limit: int = 20) -> list[DesiredVersion]:
+        """Stored versions, newest first, without their text."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM desired_sets WHERE provider = ? ORDER BY version DESC LIMIT ?",
+                (provider, limit),
+            ).fetchall()
+        return [_desired_from_row(row, with_body=False) for row in rows]
+
+    def live_link_expiry(self, profile_id: str) -> str | None:
+        """When the profile's open form link expires, or None when it has none."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT expires_at FROM form_links WHERE profile_id = ? AND consumed_at IS NULL "
+                "AND expires_at > ? ORDER BY expires_at DESC LIMIT 1",
+                (profile_id, self._now()),
+            ).fetchone()
+        return None if row is None else row["expires_at"]
+
+    def set_profile_meta(
+        self,
+        profile_id: str,
+        *,
+        description: str | None = None,
+        managed_by: str | None = None,
+    ) -> None:
+        """Change the description or the sync mark. The secret version stays."""
+        assignments = []
+        params: list = []
+        if description is not None:
+            assignments.append("description = ?")
+            params.append(description)
+        if managed_by is not None:
+            assignments.append("managed_by = ?")
+            params.append(managed_by)
+        if not assignments:
+            return
+        with self._transaction():
+            if self._profile_row(profile_id) is None:
+                raise ProfileNotFound(profile_id)
+            self._conn.execute(
+                f"UPDATE profiles SET {', '.join(assignments)} WHERE id = ?",
+                [*params, profile_id],
+            )
+
+    def sync_code(self, material: bytes) -> str:
+        """Hex HMAC-SHA256 of the sync-confirm subkey over ``material``."""
+        subkey = derive(self._store_key, self._salt, INFO_SYNC_CONFIRM)
+        return hmac.new(subkey, material, hashlib.sha256).hexdigest()
 
     def rekey(self, old_key: str) -> None:
         """Re-seal every row the current key cannot read, using `old_key`."""
@@ -1083,13 +1187,14 @@ class Store:
         return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     @contextmanager
-    def _transaction(self):
+    def _transaction(self, *, bump: bool = True):
         self._lock.acquire()
         try:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
                 yield
-                self._bump_revision()
+                if bump:
+                    self._bump_revision()
                 self._conn.execute("COMMIT")
             except Exception:
                 self._conn.execute("ROLLBACK")
@@ -1097,6 +1202,18 @@ class Store:
         finally:
             secure_files(self.path)
             self._lock.release()
+
+
+def _desired_from_row(row: sqlite3.Row, *, with_body: bool) -> DesiredVersion:
+    restored = row["restored_from"]
+    return DesiredVersion(
+        version=int(row["version"]),
+        sha256=row["sha256"],
+        created_at=row["created_at"],
+        created_by=row["created_by"],
+        restored_from=None if restored is None else int(restored),
+        body=row["body"] if with_body else "",
+    )
 
 
 def normalize_subject(subject: str) -> str:

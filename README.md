@@ -42,7 +42,7 @@ Checks on `/mcp`, in order:
 
 1. `Host`, with or without a port, must be `BOX_IDENTITY_AUDIENCE`, that name plus `-mcp`, `localhost`, `127.0.0.1`, or a name from `BOX_ALLOWED_HOSTS`. Otherwise HTTP 421 and `{"error":"misdirected_request"}`.
 2. `Authorization: Bearer` must match `BOX_BEARER_TOKEN`. The comparison does not stop early on length. Otherwise HTTP 401 and `WWW-Authenticate: Bearer`. The MCP parser does not run.
-3. `tools/list` carries no identity. The box returns the published tools from `tools.snapshot.json`, then the eleven `creds_*` tools. It does not start the provider server. Only `creds_snapshot_tools` asks the server for a fresh list, and it does that under the caller's own profile.
+3. `tools/list` carries no identity. The box returns the published tools from `tools.snapshot.json`, then the fourteen `creds_*` tools. It does not start the provider server. Only `creds_snapshot_tools` asks the server for a fresh list, and it does that under the caller's own profile.
 4. `tools/call` requires `X-Keystone-Identity`: HS256, header `typ` of `keystone-identity+jwt`, audience `BOX_IDENTITY_AUDIENCE`. `mcp_target` must be the tool name on this call. Each `jti` is accepted once, and remembered until its `exp` plus 30 seconds. The memory holds at most 100000 entries; when it is full the call is rejected and nothing already stored is dropped.
 
 A failed tool call is `isError: true` with one text block of JSON: `code`, `message`, and `hint`. `code` is one of `identity_rejected`, `no_credentials_profile`, `tool_not_in_profile`, `profile_needs_reentry`, `instance_unavailable`, `instance_failed`, `instances_exhausted`, `instance_busy`, `upstream_timeout`, `not_available`, `invalid_argument`, `unknown_provider`, `profile_exists`, `profile_not_found`, `profile_in_use`, `binding_exists`, `binding_not_found`, `secret_field_in_chat`, `secret_reentry_required`, `missing_fields`, `form_unavailable`, `check_failed`, `snapshot_invalid`. There is no `credentials_ambiguous` code: when several bindings match, the first in order is the one that applies.
@@ -157,7 +157,7 @@ One profile has at most one child. The child starts on the first call and stops 
 | Child environment | — | `PATH`, `HOME=/tmp/box/slot-N`, `TMPDIR`, `LANG=C.UTF-8`, `server.static_env`, and the variant's fields | The wrapper's environment is not inherited. A field that is not part of the variant is not passed. |
 | Slot cleanup | — | before the slot is given out, and after the child stops | A slot whose cleanup failed is quarantined and is not given out again. |
 
-The wrapper also reads `meta.revision` every 2 seconds. If a live profile was deleted, its version changed, or it now needs its secrets again, that instance is stopped (a version change lets in-flight calls finish for up to 30 seconds). `credsctl` therefore applies without restarting the container. Audit rows older than `BOX_AUDIT_RETENTION_DAYS` are deleted once an hour. A status snapshot is written about every 10 seconds for `credsctl status`.
+The wrapper also reads `meta.revision` every 2 seconds. If a live profile was deleted, its version changed, or it now needs its secrets again, that instance is stopped (a version change lets in-flight calls finish for up to 30 seconds). `credsctl` therefore applies without restarting the container. An audit row or a stored profile set does not change the revision. Audit rows older than `BOX_AUDIT_RETENTION_DAYS` are deleted once an hour. A status snapshot is written about every 10 seconds for `credsctl status`.
 
 ## Changing limits
 
@@ -440,9 +440,10 @@ Profiles and bindings live in `<BOX_DATA_DIR>/box.sqlite3` (in the image, `/data
 | `form_links` | SHA-256 of a form token, never the token |
 | `audit` | calls and admin actions, kept for `BOX_AUDIT_RETENTION_DAYS` (30) |
 | `tool_snapshots` | the newest five `tools/list` snapshots taken by `creds_snapshot_tools`: id, `sha256`, `taken_at`, profile, variant, the binding subject, and the JSON |
+| `desired_sets` | every version of the profile set stored by `creds_desired_set`: version, text, `sha256`, who wrote it and when, and the version it was restored from. The text holds no secrets. |
 | `status` | one JSON snapshot written by the running wrapper |
 
-`BOX_STORE_KEY` is the key generated for the package (`secrets.token_urlsafe(32)`). The store derives separate 32-byte keys with HKDF-SHA256 for secrets, the key check, form CSRF, and audit subject hashes. Secret fields of one profile are a single JSON object sealed with AES-256-GCM. The nonce is random. The additional data is the profile id and the secret version, so a row cannot be moved under another profile or version.
+`BOX_STORE_KEY` is the key generated for the package (`secrets.token_urlsafe(32)`). The store derives separate 32-byte keys with HKDF-SHA256 for secrets, the key check, form CSRF, audit subject hashes, and `creds_sync` confirm codes. Secret fields of one profile are a single JSON object sealed with AES-256-GCM. The nonce is random. The additional data is the profile id and the secret version, so a row cannot be moved under another profile or version.
 
 What this protects: a copy of the data volume without `BOX_STORE_KEY`. The secret fields cannot be opened.
 
@@ -456,7 +457,7 @@ A database written by a newer build is not opened and is not modified. An intern
 
 ## Box tools
 
-An administrator configures the box from chat. These eleven tools are part of the server's catalog. Secret values never travel in either direction: a tool result, a refusal, a log line, and an audit row never contain one. The person who owns the account types secrets on the one-time form.
+An administrator configures the box from chat. These fourteen tools are part of the server's catalog. Secret values never travel in either direction: a tool result, a refusal, a log line, and an audit row never contain one. The person who owns the account types secrets on the one-time form.
 
 | Tool | What it does |
 |---|---|
@@ -471,6 +472,9 @@ An administrator configures the box from chat. These eleven tools are part of th
 | `creds_whoami` | Which profile this caller would use, which binding won, and which other role bindings were skipped. |
 | `creds_check` | Run the variant's checks and start the instance. Both have to succeed. |
 | `creds_snapshot_tools` | Take the server's `tools/list` under the caller's own profile and store the snapshot in the box. |
+| `creds_desired_get` | The stored profile set: its version, who wrote it and when, its text, and the recent versions. |
+| `creds_desired_set` | Store a new version of the profile set, or restore an older one. Nothing is applied. |
+| `creds_sync` | Show what applying the stored set would change, with a confirm code; apply it when called again with that code. |
 
 ### `creds_snapshot_tools`
 
@@ -494,6 +498,78 @@ Result:
 ```
 
 `tools` are the published names after the provider's `tools` rules (`strip_prefix`, `normalize`, `rename`, `hide`), without the namespace and without the variant's patterns. `variant_filters_tools` is `true` when the profile's variant lists `tools` patterns: that account may see a narrower set, and a package built from this snapshot publishes that set to everyone. `sha256` is the hex SHA-256 of the snapshot without `taken_at`, as `json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=False)` encoded as UTF-8, so two snapshots of the same server have the same hash. The result, the log, the audit row, and the table never contain a secret value.
+
+### The profile set from chat: `creds_desired_get`, `creds_desired_set`, `creds_sync`
+
+These three tools do what [`credsctl sync`](#credsctl-sync) does, without a shell. The set is the same YAML, kept in the box with every earlier version. Secrets are never part of it: whoever owns an account types its secret on a one-time form.
+
+```yaml
+version: 1
+profiles:
+  atlassian/alexey:
+    description: Alexey
+    fields:
+      JIRA_URL: https://a.example.com
+      JIRA_USERNAME: alexey@example.com
+  atlassian/skynet:
+    variant: jira_cloud                  # needed when the fields alone do not pick one variant
+    fields:
+      JIRA_URL: https://b.example.com
+      JIRA_USERNAME: skynet@example.com
+bindings:
+  users:
+    alexey@example.com: atlassian/alexey
+    svc:backend: atlassian/backend       # a profile already in the box can be bound by id
+  roles:
+    - atlassian_writer: atlassian/skynet
+  default: null
+```
+
+`creds_desired_set` takes `text` (the YAML, at most 256 KiB) or `from_version` (copy an older version back as the newest one; this is the rollback). It checks the whole set before it stores anything: keys, fields, variants, lengths, addresses (as `creds_profile_create` does), subjects, and that every bound profile is in the set or in the box. A problem is `desired_invalid` (with `at`, where in the set) or `profile_not_found`, and nothing is stored. `secrets`, `{file: ...}`, `{env: ...}`, `env_file`, and a secret field under `fields` are refused with `secret_field_in_chat`. A set identical to the newest version is not stored again (`unchanged: true`). Storing a set applies nothing and does not change `meta.revision`.
+
+`creds_desired_get` returns the newest version, or the one given as `version`: `version`, `sha256`, `created_at`, `created_by`, `restored_from`, `text`, plus `latest` and the twenty most recent `versions` without their text. Before the first set, `version` and `text` are `null`.
+
+`creds_sync` works on the newest stored version. Called without `confirm`, it writes nothing and runs no checks: it returns the plan and a `confirm` code. Called again with that code (and the same `prune`), it applies the plan. The code is bound to the set's version, to `prune`, and to every profile and binding in the box, open form links included. If any of them changed after the plan, or the code is not that plan's, the call is refused with `sync_plan_stale` and nothing is applied; ask for a new plan. When there is nothing to change, the plan has no code, and nothing is written, the revision does not change, and no instance restarts.
+
+What applying does to each profile in the set:
+
+| `action` | When | What happens |
+|---|---|---|
+| `created` | the profile is not in the box | It is created and marked `managed_by: credsctl sync`. When the variant has secret fields, the result has `form_url` and `expires_at`, as `creds_profile_create`; the profile is checked and turned on when the form is sent. A variant without secrets is checked first and created only when the provider accepts it. |
+| `secrets_requested` | an address, or a field a check sends, changed; or the profile waits for its secrets and has no open link | A new one-time link with the new fields. The profile keeps its current fields and secrets until the form is sent, as `creds_profile_rotate`. |
+| `updated` | other non-secret fields or `description` changed | The checks run with the stored secrets, then the fields are saved as a new secret version and the running instance restarts. |
+| `awaiting_form` | the profile waits for its secrets and its link is still open | Nothing; `expires_at` says when the link ends. |
+| `unchanged` | nothing differs | Nothing. |
+| `skipped` | the provider rejected it, its variant differs from the box's, or the box has no public address for the form | Nothing for that profile; the reason is in `errors`. |
+
+`changed` lists the fields that differ. A variant cannot change through the set: give the profile a new id. Bindings and `prune` follow the same rules as `credsctl sync`: listed bindings replace what the subjects had, role positions follow the list, and only with `prune: true` are bindings that are not in the set removed and profiles marked `managed_by: credsctl sync` deleted. Other profiles stay and are listed in `not_in_set` with `managed: false`.
+
+A profile that is skipped does not stop the others. The result then has `partial: true` and `errors`, each with `id` (`check_failed`, `variant_changed`, `form_unavailable`, `profile_skipped`, `profile_in_use`, `profile_changed`, or `secret_unreadable`), `message`, and `profile` or `subject`.
+
+```json
+{
+  "version": 4,
+  "prune": false,
+  "applied": true,
+  "partial": false,
+  "changes": 2,
+  "confirm": null,
+  "profiles": [
+    {"profile": "atlassian/alexey", "variant": "jira_cloud", "action": "created",
+     "secret_fields": ["JIRA_API_TOKEN"],
+     "form_url": "https://atlassian.example.com/creds/…", "expires_at": "2026-10-27T10:15:00Z"},
+    {"profile": "atlassian/skynet", "variant": "jira_cloud", "action": "unchanged"}
+  ],
+  "bindings": [
+    {"subject": "user:alexey@example.com", "profile": "atlassian/alexey", "action": "bound"}
+  ],
+  "not_in_set": [{"profile": "atlassian/manual", "managed": false, "action": "kept"}],
+  "errors": [],
+  "next": "Send each form_url to the person who owns that account. …"
+}
+```
+
+Each call of the three tools writes an audit row (`event=admin`, the tool name, the set's version, and for `creds_sync` `prune`, `changes`, and `confirmed`); each change `creds_sync` makes writes one more, with `command` `sync`. The confirm code and form tokens are not stored. `creds_desired_set` and `creds_sync` are in `requires_human_identity` in the sample policy; `<ns>_box_admin` reaches all three through `<ns>_creds_*`, and no other sample role does.
 
 `creds_profile_create` and `creds_profile_rotate` accept only non-secret fields. Naming a secret field, in any letter case, is refused and the value is discarded. A field of type `url` is checked before anything is written. Changing a URL, or any field that a check places in a URL or a header, requires the secrets to be entered again on the form. Stored secrets are never sent to a new address.
 
@@ -519,7 +595,7 @@ The box does not check roles. Whoever the policy lets call `<ns>_creds_*` manage
 
 Do not give `<ns>_*` to an ordinary role. A pattern is matched against the full published name, so `billing_*` covers **every** tool of namespace `billing`, including `billing_admin_report`. The same pattern on this box also covers `<ns>_creds_profile_delete` and the other account tools. List the tool names the role should have. `stdio-box policy-example --namespace <ns>` prints a reader role and a writer role that do that, and a `<ns>_box_admin` role whose only grant is `<ns>_creds_*`. keystonectl prints that file and does not merge it into the policy.
 
-The five tools that change accounts (`creds_profile_create`, `creds_profile_rotate`, `creds_profile_delete`, `creds_bind`, `creds_unbind`) are listed in `requires_human_identity`. `creds_snapshot_tools` is not: it changes no account and runs under the caller's own profile. `<ns>_box_admin` covers it through `<ns>_creds_*`. Only a signed-in person may change accounts. An API key or a service account must not: those calls act for a machine, and a machine must not be able to rebind the accounts everyone else uses. The door enforces that list. The box does not.
+The seven tools that change accounts (`creds_profile_create`, `creds_profile_rotate`, `creds_profile_delete`, `creds_bind`, `creds_unbind`, `creds_desired_set`, `creds_sync`) are listed in `requires_human_identity`. `creds_snapshot_tools` is not: it changes no account and runs under the caller's own profile. `<ns>_box_admin` covers it through `<ns>_creds_*`. Only a signed-in person may change accounts. An API key or a service account must not: those calls act for a machine, and a machine must not be able to rebind the accounts everyone else uses. The door enforces that list. The box does not.
 
 ## Moving or reinstalling a box
 
@@ -613,7 +689,7 @@ credsctl status
 
 ### `credsctl sync`
 
-`sync` brings the box's profiles and bindings to what a YAML file describes. Run it by hand, or from cron or a systemd timer: when nothing differs, it writes nothing, the secret version does not change, and no running instance is restarted.
+`sync` brings the box's profiles and bindings to what a YAML file describes. To do the same from chat, without secrets in the file, see [the profile set from chat](#the-profile-set-from-chat-creds_desired_get-creds_desired_set-creds_sync). Run it by hand, or from cron or a systemd timer: when nothing differs, it writes nothing, the secret version does not change, and no running instance is restarted.
 
 ```yaml
 version: 1
@@ -722,7 +798,7 @@ docker compose exec -T <service> credsctl bind default atlassian/shared
 `stdio-box box-tools` prints the names of this image's own `creds_*` tools as one JSON array on one line and exits 0:
 
 ```json
-["creds_providers", "creds_profiles", "creds_bindings", "creds_profile_create", "creds_profile_rotate", "creds_profile_delete", "creds_bind", "creds_unbind", "creds_whoami", "creds_check", "creds_snapshot_tools"]
+["creds_providers", "creds_profiles", "creds_bindings", "creds_profile_create", "creds_profile_rotate", "creds_profile_delete", "creds_bind", "creds_unbind", "creds_whoami", "creds_check", "creds_snapshot_tools", "creds_desired_get", "creds_desired_set", "creds_sync"]
 ```
 
 It reads no configuration. Use it to learn which box tools an image has instead of reading its tag.
