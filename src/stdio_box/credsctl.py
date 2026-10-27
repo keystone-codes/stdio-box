@@ -4,18 +4,26 @@ Field values are never printed. ``profile import`` runs the variant's HTTP
 checks before it writes, unless ``--no-check`` is set. A provider refusal
 exits 1 and writes nothing. A check that cannot be reached still writes and
 exits 0 with ``check: unreachable``.
+
+``sync`` brings profiles and bindings to the state a YAML file describes. A
+profile the provider rejects is skipped and the rest is applied; that run
+exits 6.
 """
 
 import asyncio
+import hmac
 import json
 import os
 import re
 import sys
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import yaml
+
 from stdio_box.checks import run_checks, variant_title
-from stdio_box.provider import Provider, ProviderError, load_provider
+from stdio_box.provider import Provider, ProviderError, Variant, load_provider
 from stdio_box.store.errors import (
     BindingExists,
     BindingNotFound,
@@ -36,6 +44,7 @@ _USAGE = """usage: credsctl [--json] <command> [<args>]
        credsctl bind <subject> <profile> [--replace] [--position N]
        credsctl unbind <subject>
        credsctl bindings
+       credsctl sync --file <path|-> [--dry-run] [--prune] [--no-check]
        credsctl store status
        credsctl store rekey --old-key-file <path|->
        credsctl audit [--since 24h] [--profile <id>] [--event <name>]
@@ -48,6 +57,9 @@ _PROFILE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 _PROVIDER_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,30}$")
 _SINCE = re.compile(r"^(\d+)([smhd])$")
 _WRAPPER_UID = 10001
+_SYNC_MARK = "credsctl sync"
+_SYNC_USAGE = "usage: credsctl sync --file <path|-> [--dry-run] [--prune] [--no-check]"
+_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class _Usage(Exception):
@@ -82,6 +94,13 @@ class _Rejected(Exception):
         super().__init__(message)
 
 
+class _Partial(Exception):
+    def __init__(self, message: str, result: dict) -> None:
+        self.message = message
+        self.result = result
+        super().__init__(message)
+
+
 def credsctl_main(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     json_mode, rest = _extract_json(args)
@@ -101,6 +120,14 @@ def credsctl_main(argv: list[str] | None = None) -> None:
         )
     except _Exists as exc:
         _exit(json_mode, ok=False, code=4, error=_error("profile_exists", exc.message), result=None)
+    except _Partial as exc:
+        _exit(
+            json_mode,
+            ok=False,
+            code=6,
+            error=_error("partially_applied", exc.message),
+            result=exc.result,
+        )
     except StoreSchemaNewer:
         _exit(
             json_mode,
@@ -131,6 +158,8 @@ def _dispatch(args: list[str]) -> dict:
         return _unbind(rest)
     if command == "bindings":
         return _bindings(rest)
+    if command == "sync":
+        return _sync(rest)
     if command == "store":
         return _store(rest)
     if command == "audit":
@@ -417,6 +446,583 @@ def _bindings(args: list[str]) -> dict:
         store.close()
 
 
+@dataclass
+class _WantedProfile:
+    id: str
+    variant: Variant
+    public: dict[str, str]
+    secret: dict[str, str]
+    description: str | None
+
+
+@dataclass
+class _WantedBindings:
+    users: dict[str, str] = field(default_factory=dict)
+    roles: list[tuple[str, str]] = field(default_factory=list)
+    default: str | None = None
+
+    def all(self) -> list[tuple[str, str]]:
+        found = list(self.users.items()) + list(self.roles)
+        if self.default is not None:
+            found.append(("default", self.default))
+        return found
+
+
+@dataclass
+class _SyncFile:
+    profiles: dict[str, _WantedProfile]
+    bindings: _WantedBindings | None
+
+
+def _sync(args: list[str]) -> dict:
+    flags, positional = _parse_flags(
+        args, options={"--file"}, switches={"--dry-run", "--prune", "--no-check"}
+    )
+    if positional or flags["--file"] is None:
+        raise _Usage(_SYNC_USAGE)
+    provider = _load_provider()
+    path = flags["--file"]
+    if path == "-":
+        text = sys.stdin.read()
+        base = Path.cwd()
+    else:
+        file_path = Path(path)
+        if not file_path.is_file():
+            raise _Input("invalid_argument", "file not found")
+        text = file_path.read_text(encoding="utf-8")
+        base = file_path.resolve().parent
+    wanted = _read_sync_file(provider, text, base)
+    store = _open_store(provider)
+    try:
+        return _apply_sync(
+            provider,
+            store,
+            wanted,
+            dry_run=bool(flags["--dry-run"]),
+            prune=bool(flags["--prune"]),
+            check=not flags["--no-check"],
+        )
+    finally:
+        store.close()
+
+
+def _read_sync_file(provider: Provider, text: str, base: Path) -> _SyncFile:
+    """Validate the whole file before the store is opened. Any problem exits 3."""
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise _Input("invalid_argument", "the file is not valid YAML") from exc
+    if not isinstance(data, dict):
+        raise _Input("invalid_argument", "the file must be a mapping")
+    _only(data, {"version", "profiles", "bindings"}, "file")
+    if data.get("version") != 1:
+        raise _Input("invalid_argument", "version must be 1")
+    raw_profiles = data.get("profiles") or {}
+    if not isinstance(raw_profiles, dict):
+        raise _Input("invalid_argument", "profiles must be a mapping")
+    profiles: dict[str, _WantedProfile] = {}
+    for profile_id, entry in raw_profiles.items():
+        where = f"profiles.{profile_id}"
+        try:
+            profiles[str(profile_id)] = _wanted_profile(provider, str(profile_id), entry, base)
+        except _Input as exc:
+            raise _located(exc, where) from exc
+    bindings = None
+    if "bindings" in data:
+        try:
+            bindings = _wanted_bindings(provider, data["bindings"])
+        except _Input as exc:
+            raise _located(exc, "bindings") from exc
+    return _SyncFile(profiles=profiles, bindings=bindings)
+
+
+def _wanted_profile(provider: Provider, profile_id: str, entry, base: Path) -> _WantedProfile:
+    _check_profile_id(profile_id, provider.name)
+    if not isinstance(entry, dict):
+        raise _Input("invalid_argument", "a profile must be a mapping")
+    _only(entry, {"variant", "description", "fields", "secrets", "env_file"}, "profile")
+    fields = {item.name: item for item in provider.fields}
+    values: dict[str, str] = {}
+
+    def put(name: str, value: str) -> None:
+        if name in values:
+            raise _Input("invalid_argument", f"{name} is given twice")
+        values[name] = value
+
+    env_file = entry.get("env_file")
+    if env_file is not None:
+        parsed = _parse_env(_read_private_file(_sync_path(env_file, base, "env_file")))
+        unknown = sorted(name for name in parsed if name not in fields and parsed[name] != "")
+        if unknown:
+            raise _Input(
+                "unknown_fields",
+                "unknown fields: " + ", ".join(unknown),
+                {"unknown_fields": unknown},
+            )
+        for name, value in parsed.items():
+            if value != "":
+                put(name, value)
+    public_fields = entry.get("fields") or {}
+    if not isinstance(public_fields, dict):
+        raise _Input("invalid_argument", "fields must be a mapping")
+    for name, value in public_fields.items():
+        if name not in fields:
+            raise _Input("unknown_fields", f"unknown fields: {name}", {"unknown_fields": [name]})
+        if fields[name].secret:
+            raise _Input(
+                "secret_in_file",
+                f"{name} is a secret field; give it under secrets as a file or env reference",
+            )
+        if not isinstance(value, str) or value == "":
+            raise _Input("invalid_argument", f"{name} must be a non-empty string")
+        put(name, value)
+    secret_refs = entry.get("secrets") or {}
+    if not isinstance(secret_refs, dict):
+        raise _Input("invalid_argument", "secrets must be a mapping")
+    for name, ref in secret_refs.items():
+        if name not in fields:
+            raise _Input("unknown_fields", f"unknown fields: {name}", {"unknown_fields": [name]})
+        if not fields[name].secret:
+            raise _Input("invalid_argument", f"{name} is not a secret field; put it under fields")
+        put(name, _secret_value(name, ref, base))
+    variant = _select_variant(provider, set(values), entry.get("variant"))
+    missing = [name for name in variant.fields if name not in values]
+    if missing:
+        raise _Input(
+            "missing_fields", "missing fields: " + ", ".join(missing), {"missing_fields": missing}
+        )
+    extra = sorted(set(values) - set(variant.fields))
+    if extra:
+        raise _Input(
+            "invalid_argument",
+            "the profile has fields that are not part of the variant",
+            {"fields": extra},
+        )
+    public: dict[str, str] = {}
+    secret: dict[str, str] = {}
+    for name in variant.fields:
+        if len(values[name]) > fields[name].max_length:
+            raise _Input("invalid_argument", f"{name} is longer than {fields[name].max_length}")
+        if fields[name].secret:
+            secret[name] = values[name]
+        else:
+            public[name] = values[name]
+    description = entry.get("description")
+    if description is not None and (not isinstance(description, str) or len(description) > 200):
+        raise _Input("invalid_argument", "description must be a string of at most 200 characters")
+    return _WantedProfile(profile_id, variant, public, secret, description)
+
+
+def _secret_value(name: str, ref, base: Path) -> str:
+    if not isinstance(ref, dict) or len(ref) != 1 or next(iter(ref)) not in {"file", "env"}:
+        raise _Input("invalid_argument", f"{name} must be {{file: <path>}} or {{env: <NAME>}}")
+    kind, target = next(iter(ref.items()))
+    if kind == "file":
+        try:
+            value = _read_private_file(_sync_path(target, base, name)).rstrip("\r\n")
+        except _Input as exc:
+            raise _Input(exc.error_id, f"{name}: {exc.message}") from exc
+    else:
+        if not isinstance(target, str) or not _ENV_NAME.fullmatch(target):
+            raise _Input("invalid_argument", f"{name}: invalid environment variable name")
+        if target.upper().startswith("BOX_"):
+            raise _Input("invalid_argument", f"{name}: BOX_ variables cannot be used")
+        value = os.environ.get(target, "")
+        if value == "":
+            raise _Input("invalid_argument", f"{name}: environment variable {target} is not set")
+    if value == "":
+        raise _Input("invalid_argument", f"{name}: the secret is empty")
+    if "\n" in value or "\r" in value:
+        raise _Input("invalid_argument", f"{name}: the secret must be one line")
+    return value
+
+
+def _sync_path(raw, base: Path, what: str) -> str:
+    if not isinstance(raw, str) or raw in {"", "-"}:
+        raise _Input("invalid_argument", f"{what}: a file path is required")
+    path = Path(raw)
+    return str(path if path.is_absolute() else base / path)
+
+
+def _wanted_bindings(provider: Provider, raw) -> _WantedBindings:
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise _Input("invalid_argument", "bindings must be a mapping")
+    _only(raw, {"users", "roles", "default"}, "bindings")
+    wanted = _WantedBindings()
+    users = raw.get("users") or {}
+    if not isinstance(users, dict):
+        raise _Input("invalid_argument", "users must be a mapping of subject to profile")
+    for name, profile_id in users.items():
+        subject = _sync_subject(str(name), "user:")
+        if subject in wanted.users:
+            raise _Input("invalid_argument", f"{subject} is given twice")
+        wanted.users[subject] = _sync_target(provider, subject, profile_id)
+    roles = raw.get("roles") or []
+    if not isinstance(roles, list):
+        raise _Input("invalid_argument", "roles must be a list, in binding order")
+    seen: set[str] = set()
+    for item in roles:
+        if not isinstance(item, dict) or len(item) != 1:
+            raise _Input("invalid_argument", "each role is one mapping of role to profile")
+        name, profile_id = next(iter(item.items()))
+        subject = _sync_subject(str(name), "role:")
+        if subject in seen:
+            raise _Input("invalid_argument", f"{subject} is given twice")
+        seen.add(subject)
+        wanted.roles.append((subject, _sync_target(provider, subject, profile_id)))
+    if raw.get("default") is not None:
+        wanted.default = _sync_target(provider, "default", raw["default"])
+    return wanted
+
+
+def _sync_subject(name: str, prefix: str) -> str:
+    subject = name if name.lower().startswith(prefix) else prefix + name
+    try:
+        normalized = normalize_subject(subject)
+    except ValueError as exc:
+        raise _Input("invalid_argument", f"invalid subject {name}") from exc
+    if not normalized.startswith(prefix):
+        raise _Input("invalid_argument", f"invalid subject {name}")
+    return normalized
+
+
+def _sync_target(provider: Provider, subject: str, profile_id) -> str:
+    if not isinstance(profile_id, str):
+        raise _Input("invalid_argument", f"{subject}: the profile must be a profile id")
+    try:
+        _check_profile_id(profile_id, provider.name)
+    except _Input as exc:
+        raise _Input("invalid_argument", f"{subject}: invalid profile id") from exc
+    return profile_id
+
+
+def _only(mapping: dict, allowed: set[str], what: str) -> None:
+    unknown = sorted(str(key) for key in mapping if key not in allowed)
+    if unknown:
+        raise _Input("invalid_argument", f"unknown keys in {what}: " + ", ".join(unknown))
+
+
+def _located(exc: _Input, where: str) -> _Input:
+    return _Input(exc.error_id, f"{where}: {exc.message}", {**(exc.result or {}), "at": where})
+
+
+def _apply_sync(
+    provider: Provider,
+    store: Store,
+    wanted: _SyncFile,
+    *,
+    dry_run: bool,
+    prune: bool,
+    check: bool,
+) -> dict:
+    existing = {profile.id: profile for profile in store.list_profiles(provider.name)}
+    if wanted.bindings is not None:
+        for subject, profile_id in wanted.bindings.all():
+            if profile_id not in wanted.profiles and profile_id not in existing:
+                raise _Input(
+                    "profile_not_found",
+                    f"bindings: {subject}: {profile_id} is neither in the file nor in the box",
+                    {"at": "bindings", "subject": subject, "profile": profile_id},
+                )
+    errors: list[dict] = []
+    rows: list[dict] = []
+    skipped: set[str] = set()
+    for profile_id, profile in wanted.profiles.items():
+        row = _sync_profile(provider, store, existing.get(profile_id), profile, dry_run, check)
+        rows.append(row)
+        if row["action"] == "skipped":
+            skipped.add(profile_id)
+            errors.append(row.pop("error"))
+    # A new profile that was skipped does not exist; bindings to it are skipped too.
+    missing = {profile_id for profile_id in skipped if profile_id not in existing}
+    binding_rows: list[dict] = []
+    final: dict[str, str] | None = None
+    if wanted.bindings is not None:
+        final = _sync_bindings(
+            provider, store, wanted.bindings, missing, binding_rows, errors, dry_run, prune
+        )
+    if final is None:
+        found = store.bindings(provider.name)
+        final = {item.subject: item.profile_id for item in [*found.user, *found.role]}
+        if found.default is not None:
+            final["default"] = found.default.profile_id
+    left: list[dict] = []
+    in_use = set(final.values())
+    for profile_id, profile in existing.items():
+        if profile_id in wanted.profiles:
+            continue
+        managed = profile.managed_by == _SYNC_MARK
+        entry = {"profile": profile_id, "managed": managed, "action": "kept"}
+        if prune and managed:
+            if profile_id in in_use:
+                entry["action"] = "delete_failed"
+                errors.append(
+                    {
+                        "profile": profile_id,
+                        "id": "profile_in_use",
+                        "message": "profile is still bound and was not deleted",
+                    }
+                )
+            elif not dry_run:
+                try:
+                    store.delete_profile(profile_id)
+                except (ProfileInUse, ProfileNotFound):
+                    entry["action"] = "delete_failed"
+                    errors.append(
+                        {
+                            "profile": profile_id,
+                            "id": "profile_in_use",
+                            "message": "profile is still bound and was not deleted",
+                        }
+                    )
+                else:
+                    entry["action"] = "deleted"
+                    _sync_audit(store, profile_id, {"action": "deleted"})
+            else:
+                entry["action"] = "deleted"
+        left.append(entry)
+    result = {
+        "dry_run": dry_run,
+        "prune": prune,
+        "profiles": rows,
+        "bindings": binding_rows,
+        "not_in_file": left,
+        "errors": errors,
+    }
+    if errors:
+        raise _Partial("some changes were not applied; see errors", result)
+    return result
+
+
+def _sync_profile(
+    provider: Provider,
+    store: Store,
+    current,
+    wanted: _WantedProfile,
+    dry_run: bool,
+    check: bool,
+) -> dict:
+    row: dict = {"profile": wanted.id, "variant": wanted.variant.name}
+    if current is not None and _same_profile(store, current, wanted):
+        row["action"] = "unchanged"
+        return row
+    action = "created" if current is None else "rotated"
+    row["action"] = action
+    if dry_run:
+        return row
+    check_result = None
+    if check:
+        check_result = asyncio.run(
+            run_checks(
+                provider,
+                wanted.variant,
+                {**wanted.public, **wanted.secret},
+                instances=None,
+                config=url_policy_from_mapping(os.environ),
+            )
+        )
+        if check_result.ok is False:
+            row.update(action="skipped", check="rejected")
+            row["error"] = {
+                "profile": wanted.id,
+                "id": "check_failed",
+                "message": _rejection_message(wanted.variant, check_result),
+            }
+            return row
+    try:
+        if current is None:
+            store.create_profile(
+                wanted.id,
+                provider.name,
+                wanted.variant.name,
+                wanted.public,
+                wanted.description,
+                _ACTOR,
+                managed_by=_SYNC_MARK,
+            )
+            store.put_secrets(wanted.id, wanted.secret, _ACTOR, version=1)
+        else:
+            store.rotate_profile(
+                wanted.id,
+                variant=wanted.variant.name,
+                public_fields=wanted.public,
+                secrets=wanted.secret,
+                by=_ACTOR,
+                description=wanted.description,
+                managed_by=_SYNC_MARK,
+            )
+    except (ProfileExists, ProfileNotFound):
+        row["action"] = "skipped"
+        row["error"] = {
+            "profile": wanted.id,
+            "id": "profile_changed",
+            "message": "the profile was created or deleted by someone else during sync",
+        }
+        return row
+    if check_result is not None:
+        store.set_check(
+            wanted.id, check_result.ok, check_result.identity, datetime.now(timezone.utc)
+        )
+    row["check"] = "skipped" if not check else _check_label(check_result)
+    _sync_audit(
+        store, wanted.id, {"action": action, "check": row["check"], "variant": wanted.variant.name}
+    )
+    return row
+
+
+def _same_profile(store: Store, current, wanted: _WantedProfile) -> bool:
+    if current.variant != wanted.variant.name or current.public_fields != wanted.public:
+        return False
+    if wanted.description is not None and current.description != wanted.description:
+        return False
+    try:
+        stored = store.read_secrets(current.id)
+    except SecretUnreadable:
+        return False
+    # Compared in memory; neither side is printed or logged.
+    return hmac.compare_digest(_canonical(stored), _canonical(wanted.secret))
+
+
+def _canonical(values: dict) -> bytes:
+    return json.dumps(values, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _sync_bindings(
+    provider: Provider,
+    store: Store,
+    wanted: _WantedBindings,
+    missing: set[str],
+    rows: list[dict],
+    errors: list[dict],
+    dry_run: bool,
+    prune: bool,
+) -> dict[str, str]:
+    """Apply the file's bindings and return every binding as it stands afterwards."""
+    found = store.bindings(provider.name)
+    final: dict[str, str] = {}
+    kept: set[str] = set()
+
+    def unusable(subject: str, profile_id: str) -> bool:
+        if profile_id not in missing:
+            return False
+        kept.add(subject)
+        rows.append({"subject": subject, "profile": profile_id, "action": "skipped"})
+        errors.append(
+            {
+                "subject": subject,
+                "profile": profile_id,
+                "id": "profile_skipped",
+                "message": "the profile was not created, so this binding was not made",
+            }
+        )
+        return True
+
+    users = {item.subject: item.profile_id for item in found.user}
+    for subject, profile_id in wanted.users.items():
+        if unusable(subject, profile_id):
+            continue
+        final[subject] = profile_id
+        if users.get(subject) == profile_id:
+            continue
+        action = "rebound" if subject in users else "bound"
+        if not dry_run:
+            store.bind(provider.name, subject, profile_id, _ACTOR, replace=True)
+            _sync_audit(store, profile_id, {"action": action, "subject": subject})
+        rows.append({"subject": subject, "profile": profile_id, "action": action})
+    for subject, profile_id in users.items():
+        if subject in wanted.users and subject not in kept:
+            continue
+        if prune and subject not in kept:
+            _sync_unbind(provider, store, subject, profile_id, rows, dry_run)
+        else:
+            final[subject] = profile_id
+
+    before = [(item.subject, item.profile_id) for item in found.role]
+    ordered = [
+        (subject, profile_id)
+        for subject, profile_id in wanted.roles
+        if not unusable(subject, profile_id)
+    ]
+    listed = {subject for subject, _profile_id in ordered}
+    ordered += [
+        (subject, profile_id)
+        for subject, profile_id in before
+        if subject not in listed and (not prune or subject in kept)
+    ]
+    if ordered != before:
+        if not dry_run:
+            store.set_roles(provider.name, ordered, _ACTOR)
+            _sync_audit(store, None, {"action": "roles", "order": [s for s, _p in ordered]})
+        old = {
+            subject: (index, profile_id) for index, (subject, profile_id) in enumerate(before, 1)
+        }
+        new = {
+            subject: (index, profile_id) for index, (subject, profile_id) in enumerate(ordered, 1)
+        }
+        for subject, (position, profile_id) in new.items():
+            if subject not in old:
+                action = "bound"
+            elif old[subject][1] != profile_id:
+                action = "rebound"
+            elif old[subject][0] != position:
+                action = "moved"
+            else:
+                continue
+            rows.append(
+                {"subject": subject, "profile": profile_id, "action": action, "position": position}
+            )
+        for subject, (_position, profile_id) in old.items():
+            if subject not in new:
+                rows.append({"subject": subject, "profile": profile_id, "action": "unbound"})
+    final.update(dict(ordered))
+
+    current_default = None if found.default is None else found.default.profile_id
+    if wanted.default is not None and not unusable("default", wanted.default):
+        final["default"] = wanted.default
+        if current_default != wanted.default:
+            action = "bound" if current_default is None else "rebound"
+            if not dry_run:
+                store.bind(provider.name, "default", wanted.default, _ACTOR, replace=True)
+                _sync_audit(store, wanted.default, {"action": action, "subject": "default"})
+            rows.append({"subject": "default", "profile": wanted.default, "action": action})
+    elif current_default is not None:
+        if prune and "default" not in kept:
+            _sync_unbind(provider, store, "default", current_default, rows, dry_run)
+        else:
+            final["default"] = current_default
+    return final
+
+
+def _sync_unbind(
+    provider: Provider,
+    store: Store,
+    subject: str,
+    profile_id: str,
+    rows: list[dict],
+    dry_run: bool,
+) -> None:
+    if not dry_run:
+        try:
+            store.unbind(provider.name, subject)
+        except BindingNotFound:
+            pass
+        else:
+            _sync_audit(store, profile_id, {"action": "unbound", "subject": subject})
+    rows.append({"subject": subject, "profile": profile_id, "action": "unbound"})
+
+
+def _sync_audit(store: Store, profile_id: str | None, detail: dict) -> None:
+    store.record(
+        "admin",
+        sub=_ACTOR,
+        outcome="ok",
+        profile_id=profile_id,
+        detail={"command": "sync", **detail},
+    )
+
+
 def _store(args: list[str]) -> dict:
     if not args:
         raise _Usage(_USAGE)
@@ -581,6 +1187,7 @@ def _public_profile(profile) -> dict:
         "last_check_at": profile.last_check_at,
         "last_check_ok": profile.last_check_ok,
         "last_check_identity": profile.last_check_identity,
+        "managed_by": profile.managed_by,
     }
 
 
@@ -744,10 +1351,29 @@ def _exit(json_mode: bool, *, ok: bool, code: int, error: dict | None, result: d
         )
     else:
         if error is not None:
+            if result is not None and "not_in_file" in result:
+                _print_human(result)
             print(error["message"], file=sys.stderr)
         elif result is not None:
             _print_human(result)
     raise SystemExit(code)
+
+
+def _print_sync(result: dict) -> None:
+    if result["dry_run"]:
+        print("dry run: nothing was written")
+    for row in result["profiles"]:
+        check = f"  check: {row['check']}" if "check" in row else ""
+        print(f"profile  {row['profile']}  {row['action']}{check}")
+    for row in result["bindings"]:
+        position = f"  position {row['position']}" if "position" in row else ""
+        print(f"binding  {row['subject']}  {row['action']}  {row['profile']}{position}")
+    for row in result["not_in_file"]:
+        managed = "managed by sync" if row["managed"] else "not managed by sync"
+        print(f"not in file  {row['profile']}  {row['action']}  ({managed})")
+    for row in result["errors"]:
+        target = row.get("subject") or row.get("profile")
+        print(f"error  {target}  {row['id']}  {row['message']}")
 
 
 def _error(error_id: str, message: str) -> dict:
@@ -755,6 +1381,9 @@ def _error(error_id: str, message: str) -> dict:
 
 
 def _print_human(result: dict) -> None:
+    if "not_in_file" in result:
+        _print_sync(result)
+        return
     if "profiles" in result and "key_state" not in result:
         for profile in result["profiles"]:
             print(f"{profile['id']}  {profile['variant']}  {profile['state']}")

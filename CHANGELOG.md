@@ -8,6 +8,8 @@
 
 ### Added
 
+- `credsctl sync --file <path|-> [--dry-run] [--prune] [--no-check]`: brings profiles and bindings to a YAML file. Secrets are file or environment references, never values in the file; a profile that does not differ is not rewritten; a profile the provider rejects is skipped and the rest is applied, exit code 6 (`partially_applied`); `--prune` removes every binding not in the file and deletes only profiles that `sync` wrote.
+- Store schema 3: `profiles.managed_by`, set to `credsctl sync` when that command writes a profile. `credsctl profile list` shows it. The migration copies the database to `backup/` first, as before.
 - Package version 0.2.0.
 - `creds_snapshot_tools`: takes the server's `tools/list` under the caller's own profile, stores the raw snapshot (newest five, table `tool_snapshots`), and returns its id, `sha256`, the published names, the profile, the variant, and `variant_filters_tools`. Refusal code `snapshot_invalid`.
 - `credsctl snapshot list` and `credsctl snapshot export <id>`.
