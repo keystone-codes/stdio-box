@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-27
+
 ### Fixed
 
 - `creds_desired_set` messages speak to a chat: a secret field, `secrets`, or `env_file` is refused with a message that the secret is entered on the one-time form `creds_sync` sends, not with the `credsctl` advice to give a file or env reference. Messages call the text "the set" rather than "the file".

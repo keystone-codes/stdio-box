@@ -1,6 +1,6 @@
 [project]
 name = "stdio-box"
-version = "0.2.0"
+version = "0.3.0"
 description = "One container image that runs a third-party MCP stdio server behind Keystone."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -43,6 +43,8 @@ packages = ["src/stdio_box"]
 "schemas/provider-v1.json" = "stdio_box/schemas/provider-v1.json"
 "src/stdio_box/store/migrations/0001_init.sql" = "stdio_box/store/migrations/0001_init.sql"
 "src/stdio_box/store/migrations/0002_tool_snapshots.sql" = "stdio_box/store/migrations/0002_tool_snapshots.sql"
+"src/stdio_box/store/migrations/0003_profile_managed_by.sql" = "stdio_box/store/migrations/0003_profile_managed_by.sql"
+"src/stdio_box/store/migrations/0004_desired_sets.sql" = "stdio_box/store/migrations/0004_desired_sets.sql"
 
 [tool.ruff]
 target-version = "py312"
