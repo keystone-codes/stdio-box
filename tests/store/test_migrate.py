@@ -16,12 +16,12 @@ def test_clean_database_reaches_the_latest_version_and_restart_is_a_no_op(tmp_pa
     path = data / "box.sqlite3"
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     conn = sqlite3.connect(path)
-    assert migrate(conn, data, now) == 2
+    assert migrate(conn, data, now) == 3
     conn.close()
 
     conn = sqlite3.connect(path)
     before = schema_version(conn)
-    assert migrate(conn, data, now) == before == 2
+    assert migrate(conn, data, now) == before == 3
     conn.close()
     backup = data / "backup"
     assert not backup.exists() or list(backup.iterdir()) == []
@@ -75,4 +75,26 @@ def test_backup_before_migration_keeps_three(tmp_path: Path) -> None:
     assert any(".4-5." in name for name in copies)
     conn = sqlite3.connect(path)
     assert schema_version(conn) == 5
+    conn.close()
+
+
+def test_version_2_profiles_get_an_empty_managed_by(tmp_path: Path) -> None:
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    for name in ("0001_init.sql", "0002_tool_snapshots.sql"):
+        shutil.copy(migrations_dir() / name, migrations / name)
+    data = tmp_path / "data"
+    data.mkdir()
+    path = data / "box.sqlite3"
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    conn = sqlite3.connect(path)
+    assert migrate(conn, data, now, migrations) == 2
+    conn.execute(
+        "INSERT INTO profiles (id, provider, name, variant, state, public_fields, version, "
+        "created_at, created_by) VALUES ('echo/a', 'echo', 'a', 'one', 'awaiting_secrets', "
+        "'{}', 0, '2026-01-01T00:00:00Z', 'cli:credsctl')"
+    )
+    assert migrate(conn, data, now) == 3
+    row = conn.execute("SELECT managed_by FROM profiles WHERE id = 'echo/a'").fetchone()
+    assert row == (None,)
     conn.close()

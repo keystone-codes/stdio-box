@@ -434,7 +434,7 @@ Profiles and bindings live in `<BOX_DATA_DIR>/box.sqlite3` (in the image, `/data
 | Table | What it holds |
 |---|---|
 | `meta` | schema version, salt, key check, revision |
-| `profiles` | id, variant, non-secret fields, state, check result |
+| `profiles` | id, variant, non-secret fields, state, check result, `managed_by` (`credsctl sync` once that command has written the profile) |
 | `profile_secrets` | secret fields, AES-256-GCM, one row per version |
 | `bindings` | who receives which profile, and the role order |
 | `form_links` | SHA-256 of a form token, never the token |
@@ -598,6 +598,7 @@ credsctl profile import <id> [--variant <name>] --from-file <path|-> \
 credsctl bind <subject> <profile> [--replace] [--position N]
 credsctl unbind <subject>
 credsctl bindings
+credsctl sync --file <path|-> [--dry-run] [--prune] [--no-check]
 credsctl store status
 credsctl store rekey --old-key-file <path|->
 credsctl audit [--since 24h] [--profile <id>] [--event <name>]
@@ -610,6 +611,85 @@ credsctl status
 
 `bindings` prints `user`, then `role` with positions, then `default` — the same order a call is resolved in.
 
+### `credsctl sync`
+
+`sync` brings the box's profiles and bindings to what a YAML file describes. Run it by hand, or from cron or a systemd timer: when nothing differs, it writes nothing, the secret version does not change, and no running instance is restarted.
+
+```yaml
+version: 1
+profiles:
+  atlassian/alexey:                      # a person
+    description: Alexey
+    fields:                              # non-secret fields, as they are
+      JIRA_URL: https://a.example.com
+      JIRA_USERNAME: alexey@example.com
+    secrets:                             # references only
+      JIRA_API_TOKEN: {file: alexey.token}           # mode 0600
+  atlassian/backend:                     # a service account
+    env_file: backend.env                # the env file profile import reads, mode 0600
+  atlassian/skynet:                      # the shared writer account
+    variant: jira_cloud                  # optional; otherwise chosen by the fields, as in import
+    fields:
+      JIRA_URL: https://b.example.com
+      JIRA_USERNAME: skynet@example.com
+    secrets:
+      JIRA_API_TOKEN: {env: SKYNET_JIRA_TOKEN}
+bindings:
+  users:                                 # user:<sub>; svc:<name> is a service account
+    alexey@example.com: atlassian/alexey
+    svc:backend: atlassian/backend
+    skynet@example.com: atlassian/skynet
+  roles:                                 # list order is position 1, 2, 3
+    - atlassian_writer: atlassian/skynet
+  default: null
+```
+
+Secret values are never in the file itself. A secret is `{file: <path>}`, a mode `0600` file with the value on one line (a trailing line break is dropped), or `{env: <NAME>}`, an environment variable of the `credsctl` process; `BOX_*` variables are refused. `env_file` gives non-secret and secret fields together, in the format of `profile import`. Relative paths are relative to the YAML file, or to the working directory when the file is `-` (stdin). A secret field under `fields` is `secret_in_file`. A field may be given only once.
+
+What `sync` does:
+
+1. It reads and checks the whole file first: unknown keys and fields, secret references, variants, lengths, subjects, and that every bound profile is either in the file or already in the box. Any problem exits 3 and nothing is written.
+2. A profile that is not in the box is created. A profile whose variant, non-secret fields, `description`, or secrets differ is rotated: a new secret version, the same bindings, and its running instance is stopped and starts again on the next call. Secrets are compared in memory with the stored ones; neither is printed. A profile that does not differ is left as it is.
+3. Before it writes a profile, `sync` runs that variant's checks, as `profile import` does, unless `--no-check` is set. A profile the provider rejects is skipped: a new one is not created, an existing one keeps its current values, and a binding to a skipped new profile is not made. The rest of the file is still applied, and the run exits 6. A check that cannot reach the provider still writes (`check: unreachable`).
+4. When the file has `bindings`, each listed binding is set, replacing the profile it pointed at. Role bindings get positions in list order. Role bindings that are not in the file keep their order after the listed ones. A file without a `bindings` key does not touch bindings. A profile that is only in the box, for example one entered on the form, can be bound by its id without being listed under `profiles`.
+5. A profile `sync` writes is marked `managed_by: credsctl sync`.
+
+Without `--prune`, `sync` deletes nothing; profiles and bindings that are not in the file stay and are listed under `not_in_file`. With `--prune`:
+
+- every binding that is not in the file is removed, including `default` when the file has none. The file is then the complete list of who gets which account.
+- a profile that is not in the file is deleted only when it is marked `managed_by: credsctl sync`. Profiles entered on the form, created in chat, or imported by hand stay, and are listed with `managed: false`. A marked profile that is still bound is not deleted (`profile_in_use`, exit 6).
+
+`--dry-run` reads the file and the store and reports what would change, in the same shape, without running checks and without writing. It exits 0 when the file is valid, or 6 when a marked profile that `--prune` would delete is still bound.
+
+With `--json`, `result` is:
+
+```json
+{
+  "dry_run": false,
+  "prune": true,
+  "profiles": [
+    {"profile": "atlassian/alexey", "variant": "jira_cloud", "action": "rotated", "check": "ok"},
+    {"profile": "atlassian/backend", "variant": "jira_cloud", "action": "unchanged"}
+  ],
+  "bindings": [
+    {"subject": "role:atlassian_writer", "profile": "atlassian/skynet", "action": "moved", "position": 1},
+    {"subject": "user:ann@example.com", "profile": "atlassian/manual", "action": "unbound"}
+  ],
+  "not_in_file": [
+    {"profile": "atlassian/manual", "managed": false, "action": "kept"}
+  ],
+  "errors": []
+}
+```
+
+A profile's `action` is `created`, `rotated`, `unchanged`, or `skipped`; `check` is `ok`, `unreachable`, `skipped` (`--no-check`), or `rejected`, and is absent when nothing was written. A binding's `action` is `bound`, `rebound`, `moved`, `unbound`, or `skipped`; only changes are listed. In `not_in_file`, `action` is `kept`, `deleted`, or `delete_failed`. In a dry run, the actions are what would happen. On exit 6, `error` is `partially_applied` and `result` is filled in; each entry of `errors` has `id` (`check_failed`, `profile_skipped`, `profile_in_use`, or `profile_changed` when someone else created or deleted the profile during the run), `message`, and `profile` or `subject`. Without `--json`, the same report is printed one line per change. Each change writes an audit row with `command` `sync`.
+
+On a schedule, from the host. The YAML goes in on stdin; the secret files it names must be readable inside the container by uid 10001, for example from a read-only volume in the package override.
+
+```sh
+docker compose exec -T <service> credsctl --json sync --file - --prune < profiles.yaml
+```
+
 `snapshot list` prints the stored tool snapshots, newest first: `id`, `sha256`, `taken_at`, and `profile`, without the JSON. `snapshot export <id>` prints that snapshot's JSON on stdout byte for byte as stored. With `--json`, `result` is `{"id", "sha256", "snapshot"}` and `snapshot` is that same text as a string. An id that is not stored exits 3 with `snapshot_not_found`.
 
 `store status` reports `key_state`, `schema_version`, how many profiles there are, and how many are `needs_reentry`. `status` prints the wrapper's status row. Until the wrapper is running it is `{"status": "not running"}`.
@@ -618,12 +698,13 @@ Exit codes:
 
 | Code | Meaning |
 |---|---|
-| 0 | Done. An import whose check could not reach the provider is still 0 (`check: unreachable`). |
-| 1 | The provider rejected the values. Nothing was written. |
+| 0 | Done. An import whose check could not reach the provider is still 0 (`check: unreachable`). `sync` with nothing to change is 0. |
+| 1 | The provider rejected the values. Nothing was written. `sync` does not use this code; see 6. |
 | 2 | Usage. |
-| 3 | Invalid input: `unknown_fields`, `missing_fields`, `variant_ambiguous`, file mode, a bad id, subject, or position, `profile_in_use`, `binding_exists`, `snapshot_not_found`. |
+| 3 | Invalid input: `unknown_fields`, `missing_fields`, `variant_ambiguous`, file mode, a bad id, subject, or position, `profile_in_use`, `binding_exists`, `snapshot_not_found`; for `sync`, also `secret_in_file` and `profile_not_found` (a binding to a profile that is neither in the file nor in the box). Nothing was written. |
 | 4 | `--if-absent` and the profile already exists. |
 | 5 | The store cannot be opened, including a database newer than this program (`store_schema_newer`). |
+| 6 | `sync` applied part of the file (`partially_applied`): a profile the provider rejected was skipped, or a profile could not be deleted. Everything else was applied. `result.errors` lists what was not. |
 
 `--json` prints one object: `{"ok", "code", "error": {"id", "message"}, "result"}`. `code` is the exit code. `error` is `null` on success.
 

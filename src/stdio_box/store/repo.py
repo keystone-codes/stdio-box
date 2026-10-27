@@ -71,6 +71,7 @@ class Profile:
     last_check_at: str | None
     last_check_ok: bool | None
     last_check_identity: str | None
+    managed_by: str | None = None
 
 
 @dataclass(frozen=True)
@@ -194,6 +195,8 @@ class Store:
         public_fields: dict,
         description: str | None,
         by: str,
+        *,
+        managed_by: str | None = None,
     ) -> Profile:
         name = _split_id(profile_id, provider)
         with self._transaction():
@@ -202,8 +205,8 @@ class Store:
             now = self._now()
             self._conn.execute(
                 "INSERT INTO profiles (id, provider, name, variant, description, state, "
-                "public_fields, version, created_at, created_by) "
-                "VALUES (?, ?, ?, ?, ?, 'awaiting_secrets', ?, 0, ?, ?)",
+                "public_fields, version, created_at, created_by, managed_by) "
+                "VALUES (?, ?, ?, ?, ?, 'awaiting_secrets', ?, 0, ?, ?, ?)",
                 (
                     profile_id,
                     provider,
@@ -213,6 +216,7 @@ class Store:
                     json.dumps(public_fields, sort_keys=True, separators=(",", ":")),
                     now,
                     by,
+                    managed_by,
                 ),
             )
         profile = self.get_profile(profile_id)
@@ -271,6 +275,7 @@ class Store:
         secrets: dict,
         by: str,
         description: str | None = None,
+        managed_by: str | None = None,
     ) -> None:
         """Replace public fields and secrets of an existing profile in one transaction."""
         flipped = False
@@ -286,6 +291,9 @@ class Store:
             if description is not None:
                 assignments.append("description = ?")
                 params.append(description)
+            if managed_by is not None:
+                assignments.append("managed_by = ?")
+                params.append(managed_by)
             params.append(profile_id)
             self._conn.execute(f"UPDATE profiles SET {', '.join(assignments)} WHERE id = ?", params)
             flipped = self._put_secrets(
@@ -390,6 +398,19 @@ class Store:
             return self._bind_role(
                 provider, normalized, profile_id, by, now, replace=replace, position=position
             )
+
+    def set_roles(self, provider: str, ordered: list[tuple[str, str]], by: str) -> None:
+        """Replace every role binding with `ordered`, at positions 1, 2, 3 in that order."""
+        with self._transaction():
+            for subject, profile_id in ordered:
+                if not subject.startswith("role:") or normalize_subject(subject) != subject:
+                    raise ValueError("invalid subject")
+                profile = self._profile_row(profile_id)
+                if profile is None:
+                    raise ProfileNotFound(profile_id)
+                if profile["provider"] != provider:
+                    raise ValueError("profile belongs to another provider")
+            self._rewrite_roles(provider, ordered, by=by, now=self._now())
 
     def unbind(self, provider: str, subject: str) -> str:
         """Remove the binding and close the gap in role positions. Return its profile id."""
@@ -995,6 +1016,7 @@ class Store:
             last_check_at=row["last_check_at"],
             last_check_ok=None if ok is None else bool(ok),
             last_check_identity=row["last_check_identity"],
+            managed_by=row["managed_by"],
         )
 
     def _profile_row(self, profile_id: str) -> sqlite3.Row | None:
