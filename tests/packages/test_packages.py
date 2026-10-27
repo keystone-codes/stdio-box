@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 import yaml
-from tests.support.box_tools import box_tools_for
 
 from stdio_box.catalog import _published_name, build_catalog
+from stdio_box.creds_tools import box_tool_names, changing_tool_names
 from stdio_box.provider import Provider, load_provider
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -21,13 +21,6 @@ PACKAGES = ROOT / "packages"
 _IMAGE_REF = re.compile(
     r"^ghcr\.io/keystone-codes/stdio-box:"
     r"(?P<tag>[0-9]+\.[0-9]+\.[0-9]+)@sha256:(?P<digest>[0-9a-f]{64})$"
-)
-CHANGING_CREDS = (
-    "creds_profile_create",
-    "creds_profile_rotate",
-    "creds_profile_delete",
-    "creds_bind",
-    "creds_unbind",
 )
 
 
@@ -62,13 +55,16 @@ def test_provider_package(package: Path) -> None:
     snapshot = json.loads((package / "tools.snapshot.json").read_text(encoding="utf-8"))
     assert snapshot["server"]["command"] == provider.server.command
     published = [tool.name for tool in build_catalog(snapshot, provider).published_tools()]
-    creds = box_tools_for(image)
-    assert manifest["mcp"]["tools"] == published + creds
-    assert manifest["mcp"]["critical"] == _critical(snapshot, provider) + list(CHANGING_CREDS)
+    # Every box tool of this build, so the policy keystonectl installs marks the
+    # account-changing ones critical and human-only. A tool an older pinned image
+    # lacks is answered as unknown; a missing mark would leave it unprotected.
+    assert manifest["mcp"]["tools"] == published + box_tool_names()
+    changing = changing_tool_names()
+    assert manifest["mcp"]["critical"] == _critical(snapshot, provider) + changing
     for name in manifest["mcp"]["tools"]:
         assert len(f"{namespace}_{name}") <= 64
 
-    _assert_policy(package, namespace)
+    _assert_policy(package, namespace, changing)
     _assert_lint(package)
 
 
@@ -120,11 +116,15 @@ def _critical(snapshot: dict, provider: Provider) -> list[str]:
     ]
 
 
-def _assert_policy(package: Path, namespace: str) -> None:
+def _assert_policy(package: Path, namespace: str, changing: list[str]) -> None:
     rendered = _policy_example(package, namespace)
     assert (package / "policy.example.yaml").read_bytes() == rendered
     document = yaml.safe_load(rendered.decode("utf-8"))
     _assert_reader_writer(document, namespace)
+    # The manifest and the sample policy agree on which box tools change accounts.
+    prefixed = [f"{namespace}_{name}" for name in changing]
+    assert document["requires_human_identity"] == prefixed
+    assert document["critical_tools"][: len(prefixed)] == prefixed
 
 
 def _assert_reader_writer(document: dict, namespace: str) -> None:

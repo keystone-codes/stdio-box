@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `creds_desired_set` messages speak to a chat: a secret field, `secrets`, or `env_file` is refused with a message that the secret is entered on the one-time form `creds_sync` sends, not with the `credsctl` advice to give a file or env reference. Messages call the text "the set" rather than "the file".
+- `creds_sync` and `credsctl sync` list bindings that the set or file does not name, and that stay because prune is off, with `action: kept`. They are not changes: they do not make a confirm code or count in `changes`. The plan's `next` says how many there are.
+- `creds_profiles` returns `managed_by`, and `credsctl profile list` prints it.
+- `credsctl <command> --help` prints that command's usage and exits 0; it used to be `unknown argument --help`, exit 2. `credsctl --help` also exits 0.
+- The package manifests list every box tool of this build, `creds_snapshot_tools`, `creds_desired_get`, `creds_desired_set`, and `creds_sync` included, and `critical` has `creds_desired_set` and `creds_sync`, so the policy keystonectl installs marks them as the sample policy does. The package test now compares the manifests with `creds_tools` and with `policy.example.yaml`.
+
 ### Changed
 
 - An audit row no longer bumps `meta.revision`. Only credential and binding changes do, so a call that changes nothing leaves the instance watcher alone.

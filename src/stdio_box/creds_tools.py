@@ -265,6 +265,11 @@ def box_tool_names() -> list[str]:
     return [tool.name for tool in TOOLS]
 
 
+def changing_tool_names() -> list[str]:
+    """Box tools that change accounts: critical, and for a signed-in person only."""
+    return list(_CHANGING)
+
+
 def handler_for(name: str) -> _Handler | None:
     return _HANDLERS.get(name)
 
@@ -1372,6 +1377,7 @@ async def _sync(
             )
         else:
             payload["next"] = "Nothing to change."
+        payload["next"] += _left_note(plan)
         extra.update(changes=plan.changes, confirmed=False)
         return await _succeed(deps, identity, tool, None, payload, extra=extra)
     if not hmac.compare_digest(confirm.encode("utf-8"), plan.code.encode("utf-8")):
@@ -1413,9 +1419,16 @@ class _Plan:
     code: str = ""
 
     @property
+    def kept(self) -> tuple[int, int]:
+        """Bindings, and sync-written profiles, that stay only because prune is off."""
+        bindings = sum(1 for row in self.bindings if row["action"] == "kept")
+        profiles = sum(1 for row in self.left if row["managed"] and row["action"] == "kept")
+        return bindings, profiles
+
+    @property
     def changes(self) -> int:
         count = sum(1 for row in self.profiles if row["action"] in _SYNC_CHANGES)
-        count += sum(1 for row in self.bindings if row["action"] != "skipped")
+        count += sum(1 for row in self.bindings if row["action"] not in {"skipped", "kept"})
         count += sum(1 for row in self.left if row["action"] == "deleted")
         return count
 
@@ -1432,6 +1445,21 @@ class _Plan:
             "not_in_set": self.left,
             "errors": self.errors,
         }
+
+
+def _left_note(plan: "_Plan") -> str:
+    bindings, profiles = plan.kept
+    if plan.prune or not (bindings or profiles):
+        return ""
+    parts = []
+    if bindings:
+        parts.append(f"{bindings} binding{'s' if bindings != 1 else ''}")
+    if profiles:
+        parts.append(f"{profiles} profile{'s' if profiles != 1 else ''} written by sync")
+    return (
+        f" The box also has {' and '.join(parts)} that the set does not name; they stay "
+        "(action kept). Call creds_sync with prune true to see a plan that removes them."
+    )
 
 
 def _read_desired(
@@ -2101,6 +2129,7 @@ def _profile_view(deps: CredsDeps, profile: Profile, subjects: list[str]) -> dic
         "created_by": profile.created_by,
         "rotated_at": profile.rotated_at,
         "rotated_by": profile.rotated_by,
+        "managed_by": profile.managed_by,
         "last_check": _last_check(profile),
         "bindings": subjects,
         "instance": instance,

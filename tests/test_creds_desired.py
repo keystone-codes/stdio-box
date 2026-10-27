@@ -144,6 +144,9 @@ def test_set_refuses_secrets(tmp_path: Path, entry: str) -> None:
         assert refused["code"] == "secret_field_in_chat"
         assert refused["message"].startswith("profiles.echo-http/ada: ")
         assert "one-time form" in refused["hint"]
+        # The message speaks to a chat: no file or env reference is offered.
+        assert "one-time form link" in refused["message"]
+        assert "file or env" not in refused["message"]
         assert "inline-value" not in json.dumps(refused)
         assert store.get_desired("echo-http") is None
         rows = store.list_audit()
@@ -155,6 +158,7 @@ def test_set_checks_the_whole_set(tmp_path: Path) -> None:
     with _http_client(tmp_path) as (client, store, _manager, _provider):
         broken = _error(_call(client, "creds_desired_set", {"text": "version: [1"}))
         assert broken["code"] == "desired_invalid"
+        assert broken["message"] == "the set is not valid YAML"
         unknown = LABEL_SET.replace("ECHO_LABEL: team", "ECHO_COLOUR: red")
         refused = _error(_call(client, "creds_desired_set", {"text": unknown}))
         assert refused["code"] == "desired_invalid"
@@ -167,6 +171,7 @@ def test_set_checks_the_whole_set(tmp_path: Path) -> None:
         )
         refused = _error(_call(client, "creds_desired_set", {"text": dangling}))
         assert refused["code"] == "profile_not_found"
+        assert "neither in the set nor in the box" in refused["message"]
         both = _error(_call(client, "creds_desired_set", {"text": LABEL_SET, "from_version": 1}))
         assert both["code"] == "invalid_argument"
         assert store.get_desired("echo-http") is None
@@ -204,6 +209,8 @@ def test_plan_then_confirm(tmp_path: Path, upstream) -> None:
         profile = store.get_profile("echo-http/labels")
         assert profile.state == "ready"
         assert profile.managed_by == SYNC_MARK
+        listed = _ok(_call(client, "creds_profiles", {}))["profiles"]
+        assert [item["managed_by"] for item in listed] == [SYNC_MARK]
         assert profile.description == "Labels"
         assert store.bindings("echo-http").user[0].subject == "user:ann@example.com"
 
@@ -354,7 +361,15 @@ def test_prune_only_with_the_argument(tmp_path: Path, upstream) -> None:
             {"profile": "echo-http/old", "managed": True, "action": "kept"},
             {"profile": manual, "managed": False, "action": "kept"},
         ]
-        assert {row["action"] for row in kept["bindings"]} == {"bound"}
+        # Bindings the set does not name are shown, and are not changes.
+        assert kept["bindings"] == [
+            {"subject": "user:ann@example.com", "profile": "echo-http/labels", "action": "bound"},
+            {"subject": "user:bob@example.com", "profile": manual, "action": "kept"},
+            {"subject": "role:ops", "profile": "echo-http/old", "action": "kept", "position": 1},
+        ]
+        assert kept["changes"] == 2
+        assert "1 profile written by sync" in kept["next"]
+        assert "2 bindings" in kept["next"]
         _ok(_call(client, "creds_sync", {"confirm": kept["confirm"]}))
         assert store.get_profile("echo-http/old") is not None
 

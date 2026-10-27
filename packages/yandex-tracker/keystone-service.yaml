@@ -111,6 +111,10 @@ mcp:
     - creds_unbind
     - creds_whoami
     - creds_check
+    - creds_snapshot_tools
+    - creds_desired_get
+    - creds_desired_set
+    - creds_sync
   critical:
     - fr_yandex_tracker_manage_queue_access
     - fr_yandex_tracker_delete_checklist_item
@@ -129,6 +133,8 @@ mcp:
     - creds_profile_delete
     - creds_bind
     - creds_unbind
+    - creds_desired_set
+    - creds_sync
 identity:
   signed_assertion: required
   secret_env: BOX_IDENTITY_SECRET
