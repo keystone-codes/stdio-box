@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 import yaml
-from tests.support.box_tools import box_tools_for
 
 from stdio_box.catalog import build_catalog
 from stdio_box.cli import main
+from stdio_box.creds_tools import box_tool_names
 from stdio_box.provider import load_provider
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,8 +39,7 @@ def test_manifest_matches_snapshot_and_provider() -> None:
     assert manifest["name"] == "notion"
     assert manifest["mcp"]["namespace"] == "notion"
     mcp_tools = manifest["mcp"]["tools"]
-    image = manifest["containers"]["mcp"]["image"]
-    assert mcp_tools == published + box_tools_for(image)
+    assert mcp_tools == published + box_tool_names()
 
     env = {item["name"]: item.get("default") for item in manifest["containers"]["mcp"]["env"]}
     assert env["BOX_PROVIDER"] == "notion"

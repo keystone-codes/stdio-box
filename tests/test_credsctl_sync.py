@@ -242,6 +242,8 @@ def test_sync_without_prune_keeps_and_reports_what_is_not_in_the_file(
             "position": 1,
         },
         {"subject": "role:first", "profile": "atlassian/manual", "action": "moved", "position": 2},
+        {"subject": "role:reader", "profile": "atlassian/manual", "action": "kept", "position": 3},
+        {"subject": "default", "profile": "atlassian/manual", "action": "kept"},
     ]
     store = _store(box, store_key)
     found = store.bindings("atlassian")
@@ -508,3 +510,46 @@ def test_sync_human_output_lists_changes_without_values(
     assert "binding  role:atlassian_writer  bound  atlassian/skynet  position 1" in out
     for secret in (TOKEN, BACKEND, "skynet-token-value"):
         assert secret not in out
+
+
+def test_profile_list_shows_managed_by(
+    box: Path,
+    store_key: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = _three_profiles(box.parent, monkeypatch)
+    assert _invoke(_sync(path), capsys)[0] == 0
+    store = _store(box, store_key)
+    store.create_profile("atlassian/manual", "atlassian", "jira_cloud", {}, None, "tester")
+    store.close()
+    code, out, _err = _invoke(["profile", "list"], capsys)
+    assert code == 0
+    lines = out.splitlines()
+    assert "atlassian/alexey  jira_cloud  ready  managed_by: credsctl sync" in lines
+    assert "atlassian/manual  jira_cloud  awaiting_secrets  managed_by: -" in lines
+
+
+@pytest.mark.parametrize(
+    ("args", "first"),
+    [
+        (["sync", "--help"], "usage: credsctl sync --file <path|-> [--dry-run]"),
+        (["profile", "import", "-h"], "usage: credsctl profile import <id>"),
+        (["profile", "--help"], "usage: credsctl profile list"),
+        (["--help"], "usage: credsctl [--json] <command> [<args>]"),
+    ],
+)
+def test_help_exits_zero(args: list[str], first: str, capsys: pytest.CaptureFixture[str]) -> None:
+    code, out, err = _invoke(args, capsys)
+    assert code == 0
+    assert err == ""
+    assert out.startswith(first)
+
+
+def test_help_in_json_and_for_an_unknown_command(capsys: pytest.CaptureFixture[str]) -> None:
+    code, out, _err = _invoke(["--json", "sync", "--help"], capsys)
+    assert code == 0
+    assert "--prune" in json.loads(out)["result"]["usage"]
+    code, _out, err = _invoke(["nope", "--help"], capsys)
+    assert code == 2
+    assert err.startswith("usage: credsctl [--json]")

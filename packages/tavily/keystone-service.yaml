@@ -31,12 +31,18 @@ mcp:
     - creds_unbind
     - creds_whoami
     - creds_check
+    - creds_snapshot_tools
+    - creds_desired_get
+    - creds_desired_set
+    - creds_sync
   critical:
     - creds_profile_create
     - creds_profile_rotate
     - creds_profile_delete
     - creds_bind
     - creds_unbind
+    - creds_desired_set
+    - creds_sync
 identity:
   signed_assertion: required
   secret_env: BOX_IDENTITY_SECRET

@@ -65,19 +65,26 @@ class WantedBindings:
 class DesiredSet:
     profiles: dict[str, WantedProfile]
     bindings: WantedBindings | None
+    # How messages name the text: "file" for credsctl, "set" for the tools.
+    noun: str = "file"
 
 
 def parse_desired(
     provider: Provider, text: str, base: Path | None, *, secrets: bool = True
 ) -> DesiredSet:
-    """Validate the whole file. ``secrets`` false refuses every secret reference."""
+    """Validate the whole file. ``secrets`` false refuses every secret reference.
+
+    With ``secrets`` false the text came through a tool, so messages call it
+    the set and never point at ``credsctl``-only keys.
+    """
+    noun = "file" if secrets else "set"
     try:
         data = yaml.safe_load(text)
     except yaml.YAMLError as exc:
-        raise DesiredError("invalid_argument", "the file is not valid YAML") from exc
+        raise DesiredError("invalid_argument", f"the {noun} is not valid YAML") from exc
     if not isinstance(data, dict):
-        raise DesiredError("invalid_argument", "the file must be a mapping")
-    _only(data, {"version", "profiles", "bindings"}, "file")
+        raise DesiredError("invalid_argument", f"the {noun} must be a mapping")
+    _only(data, {"version", "profiles", "bindings"}, noun)
     if data.get("version") != 1:
         raise DesiredError("invalid_argument", "version must be 1")
     raw_profiles = data.get("profiles") or {}
@@ -101,7 +108,7 @@ def parse_desired(
             bindings = _wanted_bindings(provider, data["bindings"])
         except DesiredError as exc:
             raise _located(exc, "bindings") from exc
-    return DesiredSet(profiles=profiles, bindings=bindings)
+    return DesiredSet(profiles=profiles, bindings=bindings, noun=noun)
 
 
 def check_binding_targets(desired: DesiredSet, existing: set[str]) -> None:
@@ -112,7 +119,8 @@ def check_binding_targets(desired: DesiredSet, existing: set[str]) -> None:
         if profile_id not in desired.profiles and profile_id not in existing:
             raise DesiredError(
                 "profile_not_found",
-                f"bindings: {subject}: {profile_id} is neither in the file nor in the box",
+                f"bindings: {subject}: {profile_id} is neither in the {desired.noun} "
+                "nor in the box",
                 {"at": "bindings", "subject": subject, "profile": profile_id},
             )
 
@@ -143,7 +151,7 @@ def _wanted_profile(provider: Provider, profile_id: str, entry, base: Path) -> W
         for name, value in parsed.items():
             if value != "":
                 put(name, value)
-    for name, value in _public_entries(provider, entry):
+    for name, value in _public_entries(provider, entry, secrets=True):
         put(name, value)
     secret_refs = entry.get("secrets") or {}
     if not isinstance(secret_refs, dict):
@@ -186,12 +194,13 @@ def _wanted_public_profile(provider: Provider, profile_id: str, entry) -> Wanted
     if "secrets" in entry or "env_file" in entry:
         raise DesiredError(
             "secret_reference",
-            "secrets, {file: ...}, {env: ...} and env_file are not accepted here; "
-            "creds_sync sends a one-time form link for each secret",
+            "secrets are not part of the set, so secrets, {file: ...}, {env: ...} and "
+            "env_file are not accepted; creds_sync sends a one-time form link where the "
+            "account owner enters each secret",
         )
     _only(entry, {"variant", "description", "fields"}, "profile")
     fields = {item.name: item for item in provider.fields}
-    public = dict(_public_entries(provider, entry))
+    public = dict(_public_entries(provider, entry, secrets=False))
     requested = entry.get("variant")
     if requested is None and len(provider.variants) == 1:
         variant = provider.variants[0]
@@ -225,7 +234,7 @@ def _wanted_public_profile(provider: Provider, profile_id: str, entry) -> Wanted
     return WantedProfile(profile_id, variant, public, None, _description(entry))
 
 
-def _public_entries(provider: Provider, entry: dict) -> list[tuple[str, str]]:
+def _public_entries(provider: Provider, entry: dict, *, secrets: bool) -> list[tuple[str, str]]:
     fields = {item.name: item for item in provider.fields}
     public_fields = entry.get("fields") or {}
     if not isinstance(public_fields, dict):
@@ -236,10 +245,16 @@ def _public_entries(provider: Provider, entry: dict) -> list[tuple[str, str]]:
             raise DesiredError(
                 "unknown_fields", f"unknown fields: {name}", {"unknown_fields": [name]}
             )
-        if fields[name].secret:
+        if fields[name].secret and secrets:
             raise DesiredError(
                 "secret_in_file",
                 f"{name} is a secret field; give it under secrets as a file or env reference",
+            )
+        if fields[name].secret:
+            raise DesiredError(
+                "secret_in_file",
+                f"{name} is a secret field and is not part of the set; creds_sync sends "
+                "a one-time form link where the account owner enters it",
             )
         if not isinstance(value, str) or value == "":
             raise DesiredError("invalid_argument", f"{name} must be a non-empty string")
@@ -385,6 +400,8 @@ def sync_bindings(
     """Apply the file's bindings and return every binding as it stands afterwards.
 
     A binding to a profile in ``missing`` is skipped and reported in ``errors``.
+    A binding the file does not name is ``unbound`` with ``prune`` and ``kept``
+    without it, so the report shows it either way.
     """
     found = store.bindings(provider.name)
     final: dict[str, str] = {}
@@ -424,6 +441,8 @@ def sync_bindings(
             _sync_unbind(provider, store, subject, profile_id, rows, dry_run, audit)
         else:
             final[subject] = profile_id
+            if subject not in wanted.users:
+                rows.append({"subject": subject, "profile": profile_id, "action": "kept"})
 
     before = [(item.subject, item.profile_id) for item in found.role]
     ordered = [
@@ -462,6 +481,13 @@ def sync_bindings(
         for subject, (_position, profile_id) in old.items():
             if subject not in new:
                 rows.append({"subject": subject, "profile": profile_id, "action": "unbound"})
+    reported = {row["subject"] for row in rows}
+    named = {subject for subject, _profile_id in wanted.roles}
+    for position, (subject, profile_id) in enumerate(ordered, 1):
+        if subject not in named and subject not in reported:
+            rows.append(
+                {"subject": subject, "profile": profile_id, "action": "kept", "position": position}
+            )
     final.update(dict(ordered))
 
     current_default = None if found.default is None else found.default.profile_id
@@ -478,6 +504,8 @@ def sync_bindings(
             _sync_unbind(provider, store, "default", current_default, rows, dry_run, audit)
         else:
             final["default"] = current_default
+            if wanted.default is None:
+                rows.append({"subject": "default", "profile": current_default, "action": "kept"})
     return final
 
 

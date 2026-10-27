@@ -64,6 +64,36 @@ _USAGE = """usage: credsctl [--json] <command> [<args>]
        credsctl snapshot export <id>
        credsctl status"""
 
+_HELP = {
+    "profile list": "List profiles: id, variant, state, and managed_by. Field values are not shown.",
+    "profile delete": "Delete a profile that nothing is bound to.",
+    "profile import": (
+        "Create or replace a profile from an env file (NAME=value, mode 0600, or - for stdin).\n"
+        "The variant's checks run first unless --no-check is set. --if-absent exits 4 when the\n"
+        "profile exists. Import does not bind the profile."
+    ),
+    "bind": (
+        "Bind user:<email>, user:svc:<name>, role:<role>, or default to a profile.\n"
+        "--replace points an existing binding at another profile; --position orders roles."
+    ),
+    "unbind": "Remove one binding.",
+    "bindings": "List bindings in the order a call is resolved: user, role by position, default.",
+    "sync": (
+        "Bring profiles and bindings to a YAML file. Secrets are {file: <path>} (mode 0600) or\n"
+        "{env: <NAME>} references, or come from env_file.\n"
+        "  --dry-run   report what would change; write nothing and run no checks\n"
+        "  --prune     remove bindings not in the file, and delete profiles sync wrote\n"
+        "  --no-check  write without running the variant's checks\n"
+        "Exit 0 done, 3 invalid file (nothing written), 6 partly applied (see errors)."
+    ),
+    "store status": "Key state, schema version, and profile counts.",
+    "store rekey": "Re-seal secrets that the current key cannot read, using the old key.",
+    "audit": "Audit rows, oldest first.",
+    "snapshot list": "Stored tools/list snapshots, newest first.",
+    "snapshot export": "Print one stored snapshot as it was stored.",
+    "status": "The running wrapper's status row.",
+}
+
 _ACTOR = "cli:credsctl"
 _PROVIDER_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,30}$")
 _SINCE = re.compile(r"^(\d+)([smhd])$")
@@ -105,8 +135,10 @@ class _Partial(Exception):
 def credsctl_main(argv: list[str] | None = None) -> None:
     args = list(sys.argv[1:] if argv is None else argv)
     json_mode, rest = _extract_json(args)
-    if not rest or rest[0] in {"-h", "--help"}:
+    if not rest:
         _exit_usage(json_mode)
+    if "-h" in rest or "--help" in rest:
+        _exit_help(json_mode, rest)
     # Drop before any file or database is opened.
     _drop_root()
     try:
@@ -906,6 +938,50 @@ def _drop_root() -> None:
     os.setuid(_WRAPPER_UID)
 
 
+def _exit_help(json_mode: bool, args: list[str]) -> None:
+    """Usage of the command named before ``--help``, on stdout, exit 0."""
+    words = []
+    for token in args:
+        if token.startswith("-"):
+            break
+        words.append(token)
+    entries = _usage_entries()
+    if words:
+        while words and not [entry for entry in entries if _names(entry, words)]:
+            words.pop()
+        if not words:
+            _exit_usage(json_mode)
+        entries = [entry for entry in entries if _names(entry, words)]
+    lines = ["usage: " + entries[0], *("       " + entry for entry in entries[1:])]
+    for entry in entries if words else []:
+        for key, text in _HELP.items():
+            if _names(entry, key.split()) and len(entries) == 1:
+                lines += ["", text]
+    if not words:
+        lines = [_USAGE]
+    text = "\n".join(lines)
+    if json_mode:
+        _exit(True, ok=True, code=0, error=None, result={"usage": text})
+    print(text)
+    raise SystemExit(0)
+
+
+def _usage_entries() -> list[str]:
+    entries: list[str] = []
+    for line in _USAGE.splitlines()[1:]:
+        stripped = line.strip()
+        if stripped.startswith("credsctl "):
+            entries.append(stripped)
+        elif entries:
+            entries[-1] += " " + stripped
+    return entries
+
+
+def _names(entry: str, words: list[str]) -> bool:
+    tokens = entry.split()[1:]
+    return tokens[: len(words)] == words
+
+
 def _exit_usage(json_mode: bool) -> None:
     _exit(json_mode, ok=False, code=2, error=_error("usage", _USAGE), result=None)
 
@@ -955,7 +1031,10 @@ def _print_human(result: dict) -> None:
         return
     if "profiles" in result and "key_state" not in result:
         for profile in result["profiles"]:
-            print(f"{profile['id']}  {profile['variant']}  {profile['state']}")
+            managed = profile.get("managed_by") or "-"
+            print(
+                f"{profile['id']}  {profile['variant']}  {profile['state']}  managed_by: {managed}"
+            )
         return
     if "user" in result and "role" in result and "default" in result:
         print("user")

@@ -462,7 +462,7 @@ An administrator configures the box from chat. These fourteen tools are part of 
 | Tool | What it does |
 |---|---|
 | `creds_providers` | The provider in this box: variants, which fields are secret, `server.installed_key`, and `isolation`. |
-| `creds_profiles` | Profiles, their non-secret fields, last check, bindings, and the instance if one is running. |
+| `creds_profiles` | Profiles, their non-secret fields, `managed_by`, last check, bindings, and the instance if one is running. |
 | `creds_bindings` | Every binding in the order a call is resolved: `user`, then `role` by position, then `default`. Each row includes the profile's state. |
 | `creds_profile_create` | Create a profile. When the variant has secret fields, the result is a one-time link. |
 | `creds_profile_rotate` | Change non-secret fields, or issue a new link so the secrets can be entered again. |
@@ -525,11 +525,11 @@ bindings:
   default: null
 ```
 
-`creds_desired_set` takes `text` (the YAML, at most 256 KiB) or `from_version` (copy an older version back as the newest one; this is the rollback). It checks the whole set before it stores anything: keys, fields, variants, lengths, addresses (as `creds_profile_create` does), subjects, and that every bound profile is in the set or in the box. A problem is `desired_invalid` (with `at`, where in the set) or `profile_not_found`, and nothing is stored. `secrets`, `{file: ...}`, `{env: ...}`, `env_file`, and a secret field under `fields` are refused with `secret_field_in_chat`. A set identical to the newest version is not stored again (`unchanged: true`). Storing a set applies nothing and does not change `meta.revision`.
+`creds_desired_set` takes `text` (the YAML, at most 256 KiB) or `from_version` (copy an older version back as the newest one; this is the rollback). It checks the whole set before it stores anything: keys, fields, variants, lengths, addresses (as `creds_profile_create` does), subjects, and that every bound profile is in the set or in the box. A problem is `desired_invalid` (with `at`, where in the set) or `profile_not_found`, and nothing is stored. `secrets`, `{file: ...}`, `{env: ...}`, `env_file`, and a secret field under `fields` are refused with `secret_field_in_chat`; the message says that `creds_sync` sends a one-time form link where the account owner enters the secret. A set identical to the newest version is not stored again (`unchanged: true`). Storing a set applies nothing and does not change `meta.revision`.
 
 `creds_desired_get` returns the newest version, or the one given as `version`: `version`, `sha256`, `created_at`, `created_by`, `restored_from`, `text`, plus `latest` and the twenty most recent `versions` without their text. Before the first set, `version` and `text` are `null`.
 
-`creds_sync` works on the newest stored version. Called without `confirm`, it writes nothing and runs no checks: it returns the plan and a `confirm` code. Called again with that code (and the same `prune`), it applies the plan. The code is bound to the set's version, to `prune`, and to every profile and binding in the box, open form links included. If any of them changed after the plan, or the code is not that plan's, the call is refused with `sync_plan_stale` and nothing is applied; ask for a new plan. When there is nothing to change, the plan has no code, and nothing is written, the revision does not change, and no instance restarts.
+`creds_sync` works on the newest stored version. Called without `confirm`, it writes nothing and runs no checks: it returns the plan and a `confirm` code. Called again with that code (and the same `prune`), it applies the plan. The code is bound to the set's version, to `prune`, and to every profile and binding in the box, open form links included. If any of them changed after the plan, or the code is not that plan's, the call is refused with `sync_plan_stale` and nothing is applied; ask for a new plan. When there is nothing to change, the plan has no code, and nothing is written, the revision does not change, and no instance restarts. Bindings and sync-written profiles that the set does not name, and that stay because `prune` is off, are listed with `action: kept` and are not changes; `next` then says how many there are and that `prune: true` would remove them.
 
 What applying does to each profile in the set:
 
@@ -542,7 +542,7 @@ What applying does to each profile in the set:
 | `unchanged` | nothing differs | Nothing. |
 | `skipped` | the provider rejected it, its variant differs from the box's, or the box has no public address for the form | Nothing for that profile; the reason is in `errors`. |
 
-`changed` lists the fields that differ. A variant cannot change through the set: give the profile a new id. Bindings and `prune` follow the same rules as `credsctl sync`: listed bindings replace what the subjects had, role positions follow the list, and only with `prune: true` are bindings that are not in the set removed and profiles marked `managed_by: credsctl sync` deleted. Other profiles stay and are listed in `not_in_set` with `managed: false`.
+`changed` lists the fields that differ. A variant cannot change through the set: give the profile a new id. Bindings and `prune` follow the same rules as `credsctl sync`: listed bindings replace what the subjects had, role positions follow the list, and only with `prune: true` are bindings that are not in the set removed and profiles marked `managed_by: credsctl sync` deleted. Without it, those bindings are listed under `bindings` with `action: kept`. Other profiles stay and are listed in `not_in_set` with `managed: false`.
 
 A profile that is skipped does not stop the others. The result then has `partial: true` and `errors`, each with `id` (`check_failed`, `variant_changed`, `form_unavailable`, `profile_skipped`, `profile_in_use`, `profile_changed`, or `secret_unreadable`), `message`, and `profile` or `subject`.
 
@@ -664,7 +664,7 @@ Rotation writes the new values only after the check is not a refusal. Until then
 
 ## credsctl
 
-`credsctl` is the operator CLI. In the container it runs as uid 10001. Started as root, it drops to that uid before it opens the database. Every command accepts `--json`. Field values are never printed. Each command that changes the store writes an audit row `event=admin`, `sub=cli:credsctl`.
+`credsctl` is the operator CLI. In the container it runs as uid 10001. Started as root, it drops to that uid before it opens the database. Every command accepts `--json`. `credsctl <command> --help` prints that command's usage and exits 0. Field values are never printed. Each command that changes the store writes an audit row `event=admin`, `sub=cli:credsctl`.
 
 ```
 credsctl profile list
@@ -730,7 +730,7 @@ What `sync` does:
 4. When the file has `bindings`, each listed binding is set, replacing the profile it pointed at. Role bindings get positions in list order. Role bindings that are not in the file keep their order after the listed ones. A file without a `bindings` key does not touch bindings. A profile that is only in the box, for example one entered on the form, can be bound by its id without being listed under `profiles`.
 5. A profile `sync` writes is marked `managed_by: credsctl sync`.
 
-Without `--prune`, `sync` deletes nothing; profiles and bindings that are not in the file stay and are listed under `not_in_file`. With `--prune`:
+Without `--prune`, `sync` deletes nothing; profiles that are not in the file stay and are listed under `not_in_file`, and, when the file has `bindings`, bindings that are not in it stay and are listed under `bindings` with `action: kept`. With `--prune`:
 
 - every binding that is not in the file is removed, including `default` when the file has none. The file is then the complete list of who gets which account.
 - a profile that is not in the file is deleted only when it is marked `managed_by: credsctl sync`. Profiles entered on the form, created in chat, or imported by hand stay, and are listed with `managed: false`. A marked profile that is still bound is not deleted (`profile_in_use`, exit 6).
@@ -758,7 +758,7 @@ With `--json`, `result` is:
 }
 ```
 
-A profile's `action` is `created`, `rotated`, `unchanged`, or `skipped`; `check` is `ok`, `unreachable`, `skipped` (`--no-check`), or `rejected`, and is absent when nothing was written. A binding's `action` is `bound`, `rebound`, `moved`, `unbound`, or `skipped`; only changes are listed. In `not_in_file`, `action` is `kept`, `deleted`, or `delete_failed`. In a dry run, the actions are what would happen. On exit 6, `error` is `partially_applied` and `result` is filled in; each entry of `errors` has `id` (`check_failed`, `profile_skipped`, `profile_in_use`, or `profile_changed` when someone else created or deleted the profile during the run), `message`, and `profile` or `subject`. Without `--json`, the same report is printed one line per change. Each change writes an audit row with `command` `sync`.
+A profile's `action` is `created`, `rotated`, `unchanged`, or `skipped`; `check` is `ok`, `unreachable`, `skipped` (`--no-check`), or `rejected`, and is absent when nothing was written. A binding's `action` is `bound`, `rebound`, `moved`, `unbound`, `skipped`, or `kept` (not in the file, left because `--prune` is off); bindings the file names and that already match are not listed. In `not_in_file`, `action` is `kept`, `deleted`, or `delete_failed`. In a dry run, the actions are what would happen. On exit 6, `error` is `partially_applied` and `result` is filled in; each entry of `errors` has `id` (`check_failed`, `profile_skipped`, `profile_in_use`, or `profile_changed` when someone else created or deleted the profile during the run), `message`, and `profile` or `subject`. Without `--json`, the same report is printed one line per change. Each change writes an audit row with `command` `sync`.
 
 On a schedule, from the host. The YAML goes in on stdin; the secret files it names must be readable inside the container by uid 10001, for example from a read-only volume in the package override.
 
