@@ -19,6 +19,7 @@
 
 ### Added
 
+- Packages atlassian 1.1.0, notion 1.1.0, tavily 1.1.0, yandex-tracker 1.1.0, yandex-wiki 1.1.0 on image 0.3.0. They list every box tool of this build and mark `creds_desired_set` and `creds_sync` critical.
 - `creds_desired_get`, `creds_desired_set`, and `creds_sync`: the `credsctl sync` set from chat. The set is stored in the box with every version (`from_version` restores an older one) and holds no secrets; `secrets`, `{file:}`, `{env:}`, and `env_file` are refused with `secret_field_in_chat`. `creds_sync` returns a plan and a confirm code, and applies only when called again with that code; the code goes stale (`sync_plan_stale`) when the set or the box changes. A profile that needs a secret gets a one-time form link. `prune` follows the `credsctl sync` rules. Refusal codes `desired_not_found`, `desired_invalid`, and `sync_plan_stale`. The sample policy lists `creds_desired_set` and `creds_sync` in `critical_tools` and `requires_human_identity`. `stdio-box box-tools` now prints fourteen names.
 - Store schema 4: table `desired_sets`.
 - `credsctl sync --file <path|-> [--dry-run] [--prune] [--no-check]`: brings profiles and bindings to a YAML file. Secrets are file or environment references, never values in the file; a profile that does not differ is not rewritten; a profile the provider rejects is skipped and the rest is applied, exit code 6 (`partially_applied`); `--prune` removes every binding not in the file and deletes only profiles that `sync` wrote.
