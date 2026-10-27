@@ -77,8 +77,12 @@ def test_pin_real_manifests_change_only_the_image_line(tmp_path: Path) -> None:
     _pyproject(tmp_path)
     (tmp_path / "IMAGE").write_bytes((ROOT / "IMAGE").read_bytes())
     before: dict[Path, bytes] = {}
+    expected: list[str] = []
     for name in _RELEASE_PACKAGES:
         source = packages / name / "keystone-service.yaml"
+        version = re.search(r"^version: (\S+)$", source.read_text(encoding="utf-8"), re.M)
+        assert version is not None
+        expected.append(f"{name} {version.group(1)}")
         dest_dir = tmp_path / "packages" / name
         dest_dir.mkdir(parents=True)
         dest = dest_dir / "keystone-service.yaml"
@@ -88,7 +92,7 @@ def test_pin_real_manifests_change_only_the_image_line(tmp_path: Path) -> None:
 
     completed = _run(tmp_path, _REF)
     assert completed.returncode == 0, completed.stderr
-    assert completed.stdout.splitlines() == [f"{name} 1.0.0" for name in _RELEASE_PACKAGES]
+    assert completed.stdout.splitlines() == expected
     assert (tmp_path / "IMAGE").read_bytes() == f"{_REF}\n".encode()
     for dest, old in before.items():
         new = dest.read_bytes()
