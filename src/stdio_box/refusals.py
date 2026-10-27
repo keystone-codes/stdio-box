@@ -29,6 +29,9 @@ MISSING_FIELDS = "missing_fields"
 FORM_UNAVAILABLE = "form_unavailable"
 CHECK_FAILED = "check_failed"
 SNAPSHOT_INVALID = "snapshot_invalid"
+DESIRED_NOT_FOUND = "desired_not_found"
+DESIRED_INVALID = "desired_invalid"
+SYNC_PLAN_STALE = "sync_plan_stale"
 
 
 @dataclass(frozen=True)

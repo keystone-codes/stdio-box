@@ -230,14 +230,15 @@ def test_only_the_newest_five_are_kept(
     assert code == 2
 
 
-def test_box_tools_prints_eleven_names(capsys: pytest.CaptureFixture[str]) -> None:
+def test_box_tools_prints_fourteen_names(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc:
         main(["box-tools"])
     assert exc.value.code == 0
     names = json.loads(capsys.readouterr().out)
-    assert len(names) == 11
+    assert len(names) == 14
     assert names == [tool.name for tool in TOOLS]
-    assert names[-1] == "creds_snapshot_tools"
+    assert names[10] == "creds_snapshot_tools"
+    assert names[-3:] == ["creds_desired_get", "creds_desired_set", "creds_sync"]
     assert all(name.startswith("creds_") for name in names)
 
 

@@ -14,6 +14,6 @@ roles:
   tavily_box_admin:
     description: "Manage accounts and bindings in the tavily box."
     allow: ["tavily_creds_*"]
-critical_tools: [tavily_creds_profile_create, tavily_creds_profile_rotate, tavily_creds_profile_delete, tavily_creds_bind, tavily_creds_unbind]
+critical_tools: [tavily_creds_profile_create, tavily_creds_profile_rotate, tavily_creds_profile_delete, tavily_creds_bind, tavily_creds_unbind, tavily_creds_desired_set, tavily_creds_sync]
 # Only a signed-in person may change accounts; API keys and service accounts may not.
-requires_human_identity: [tavily_creds_profile_create, tavily_creds_profile_rotate, tavily_creds_profile_delete, tavily_creds_bind, tavily_creds_unbind]
+requires_human_identity: [tavily_creds_profile_create, tavily_creds_profile_rotate, tavily_creds_profile_delete, tavily_creds_bind, tavily_creds_unbind, tavily_creds_desired_set, tavily_creds_sync]

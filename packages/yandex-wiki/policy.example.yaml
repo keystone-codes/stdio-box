@@ -14,6 +14,6 @@ roles:
   yandex_wiki_box_admin:
     description: "Manage accounts and bindings in the yandex_wiki box."
     allow: ["yandex_wiki_creds_*"]
-critical_tools: [yandex_wiki_creds_profile_create, yandex_wiki_creds_profile_rotate, yandex_wiki_creds_profile_delete, yandex_wiki_creds_bind, yandex_wiki_creds_unbind]
+critical_tools: [yandex_wiki_creds_profile_create, yandex_wiki_creds_profile_rotate, yandex_wiki_creds_profile_delete, yandex_wiki_creds_bind, yandex_wiki_creds_unbind, yandex_wiki_creds_desired_set, yandex_wiki_creds_sync]
 # Only a signed-in person may change accounts; API keys and service accounts may not.
-requires_human_identity: [yandex_wiki_creds_profile_create, yandex_wiki_creds_profile_rotate, yandex_wiki_creds_profile_delete, yandex_wiki_creds_bind, yandex_wiki_creds_unbind]
+requires_human_identity: [yandex_wiki_creds_profile_create, yandex_wiki_creds_profile_rotate, yandex_wiki_creds_profile_delete, yandex_wiki_creds_bind, yandex_wiki_creds_unbind, yandex_wiki_creds_desired_set, yandex_wiki_creds_sync]

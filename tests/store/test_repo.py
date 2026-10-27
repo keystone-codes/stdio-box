@@ -153,7 +153,24 @@ def test_revision_grows_on_each_write(tmp_path: Path, store_key: str) -> None:
     seen.append(store.revision())
     store.unbind("atlassian", "default")
     seen.append(store.revision())
-    store.record("admin", sub="cli:credsctl", outcome="ok", profile_id=PROFILE)
-    seen.append(store.revision())
     assert seen == list(range(seen[0], seen[0] + len(seen)))
+    store.close()
+
+
+def test_audit_and_desired_sets_do_not_bump_revision(tmp_path: Path, store_key: str) -> None:
+    store = _open(tmp_path, store_key)
+    before = store.revision()
+    store.record("admin", sub="cli:credsctl", outcome="ok", profile_id=PROFILE)
+    first = store.put_desired("atlassian", "version: 1\n", "admin@example.com")
+    second = store.put_desired(
+        "atlassian", "version: 1\nprofiles: {}\n", "admin@example.com", restored_from=None
+    )
+    assert store.revision() == before
+    assert second.version == first.version + 1
+    assert store.get_desired("atlassian").version == second.version
+    assert store.get_desired("atlassian", first.version).body == "version: 1\n"
+    assert store.get_desired("other") is None
+    listed = store.list_desired("atlassian")
+    assert [item.version for item in listed] == [second.version, first.version]
+    assert all(item.body == "" for item in listed)
     store.close()

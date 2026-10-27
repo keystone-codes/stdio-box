@@ -9,7 +9,12 @@ import re
 from stdio_box.creds_tools import TOOLS
 
 _IMAGE_TAG = re.compile(r"^ghcr\.io/keystone-codes/stdio-box:(?P<tag>[0-9]+\.[0-9]+\.[0-9]+)@")
-_ADDED_IN = {"creds_snapshot_tools": (0, 2, 0)}
+_ADDED_IN = {
+    "creds_snapshot_tools": (0, 2, 0),
+    "creds_desired_get": (0, 3, 0),
+    "creds_desired_set": (0, 3, 0),
+    "creds_sync": (0, 3, 0),
+}
 
 
 def box_tools_for(image: str) -> list[str]:

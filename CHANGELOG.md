@@ -4,10 +4,13 @@
 
 ### Changed
 
+- An audit row no longer bumps `meta.revision`. Only credential and binding changes do, so a call that changes nothing leaves the instance watcher alone.
 - The one-time secret page at `/creds/<token>` is set in type, with the account and its already-known fields set apart from the secret inputs. The page still has no script and no external resources.
 
 ### Added
 
+- `creds_desired_get`, `creds_desired_set`, and `creds_sync`: the `credsctl sync` set from chat. The set is stored in the box with every version (`from_version` restores an older one) and holds no secrets; `secrets`, `{file:}`, `{env:}`, and `env_file` are refused with `secret_field_in_chat`. `creds_sync` returns a plan and a confirm code, and applies only when called again with that code; the code goes stale (`sync_plan_stale`) when the set or the box changes. A profile that needs a secret gets a one-time form link. `prune` follows the `credsctl sync` rules. Refusal codes `desired_not_found`, `desired_invalid`, and `sync_plan_stale`. The sample policy lists `creds_desired_set` and `creds_sync` in `critical_tools` and `requires_human_identity`. `stdio-box box-tools` now prints fourteen names.
+- Store schema 4: table `desired_sets`.
 - `credsctl sync --file <path|-> [--dry-run] [--prune] [--no-check]`: brings profiles and bindings to a YAML file. Secrets are file or environment references, never values in the file; a profile that does not differ is not rewritten; a profile the provider rejects is skipped and the rest is applied, exit code 6 (`partially_applied`); `--prune` removes every binding not in the file and deletes only profiles that `sync` wrote.
 - Store schema 3: `profiles.managed_by`, set to `credsctl sync` when that command writes a profile. `credsctl profile list` shows it. The migration copies the database to `backup/` first, as before.
 - Package version 0.2.0.
