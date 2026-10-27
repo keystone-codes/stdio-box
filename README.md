@@ -81,6 +81,65 @@ The tool must be in the profile variant's `tools` patterns (or the variant must 
 
 ## Instances
 
+One package runs as one box container. Inside it, the wrapper starts one copy of the provider's server per profile, so each account of the external system has its own process. The path of one call, with three profiles of the `atlassian` box:
+
+```mermaid
+flowchart LR
+  person["Person<br/>signed in with Google"]
+  backend["Service svc:backend<br/>API key"]
+  rolecheck["Service svc:role-check<br/>API key, role atlassian_writer"]
+
+  door["keystone-mcp door<br/>roles, policy,<br/>signed X-Keystone-Identity"]
+
+  subgraph box["atlassian-mcp container, one per package"]
+    wrapper["box wrapper<br/>picks a profile:<br/>user → role → default"]
+    p1["atlassian/alexey<br/>own process, uid 20000+slot"]
+    p2["atlassian/backend<br/>own process, uid 20000+slot"]
+    p3["atlassian/skynet<br/>own process, uid 20000+slot"]
+  end
+
+  jiraA["Jira a.example.com"]
+  jiraB["Jira b.example.com"]
+
+  person --> door
+  backend --> door
+  rolecheck --> door
+  door --> wrapper
+  wrapper -- "user:alexey@example.com" --> p1
+  wrapper -- "user:svc:backend" --> p2
+  wrapper -- "role:atlassian_writer, position 1" --> p3
+  p1 --> jiraA
+  p2 --> jiraB
+  p3 --> jiraB
+```
+
+The same path as text, for a terminal:
+
+```
+MCP client            an agent signed in at the door, or a service with its own service account
+   │  MCP over HTTPS
+   ▼
+keystone-mcp door     signs the caller in, reads their roles, applies the policy
+   │  Authorization: Bearer <BOX_BEARER_TOKEN>
+   │  X-Keystone-Identity: sub, roles, mcp_target   (signed, one use)
+   ▼
+atlassian-mcp         one container for the package
+ └─ wrapper           picks one profile per call: user:<sub> → role:<name> by position → default
+     │
+     ├─ atlassian/alexey   ← user:alexey@example.com
+     │    └─ child uid 20000+slot  mcp-atlassian  ──▶ Jira and Confluence as Alexey
+     ├─ atlassian/backend  ← user:svc:backend
+     │    └─ child uid 20000+slot  mcp-atlassian  ──▶ as the backend service account
+     └─ atlassian/skynet   ← user:skynet@example.com, role:atlassian_writer (position 1)
+          └─ child uid 20000+slot  mcp-atlassian  ──▶ as the shared writer account
+```
+
+- The door decides whether the caller may call the tool at all. The box decides which account the call runs under.
+- A person with no `user:` binding who has the role `atlassian_writer` runs as `atlassian/skynet`. A caller that matches nothing, and the box has no `default`, gets `no_credentials_profile`.
+- A child starts on the first call for its profile and stops after `BOX_IDLE_SECONDS` without calls. At most `BOX_MAX_INSTANCES` children run at once; a new profile evicts the idle one that was used longest ago.
+- Each child runs under its own uid `20000+slot` (`isolation: per_slot_uid` in `/healthz`) with its own `HOME`, and gets only its own profile's fields.
+- Adding, changing, binding, or deleting a profile (with `credsctl` or the `creds_*` tools) takes effect within about 2 seconds, without restarting the container.
+
 One profile has at most one child. The child starts on the first call and stops when it is idle. The instance key is the profile id and its secret version.
 
 | Limit | Setting | Default | What happens |
@@ -547,7 +606,7 @@ credsctl snapshot export <id>
 credsctl status
 ```
 
-`profile import` reads an env file (`NAME=value`, blank lines and `#` comments skipped, quotes left as typed). The file must be mode `0600` unless the path is `-` (stdin). Without `--variant`, the variant is the one whose fields are exactly the non-empty provider fields in the file. A file that matches none (or more than one) is `variant_ambiguous`. Keys that are not provider fields are `unknown_fields` unless `--ignore-unknown` is set, in which case those names are skipped and listed as `ignored`. `--if-absent` on a profile that already exists exits 4 and writes nothing. Import does not bind the profile; bind is a separate command. Without `--no-check`, the variant's HTTP checks run before anything is written. A refusal exits 1 and leaves the store unchanged. If a check cannot be reached, the import still exits 0 (`check: unreachable`) and `last_check_ok` stays null. `--no-check` stores the values without a check (`check: skipped`, `last_check_ok` null).
+`profile import` reads an env file (`NAME=value`, blank lines and `#` comments skipped, quotes left as typed). The file must be mode `0600` unless the path is `-` (stdin). Without `--variant`, the variant is the one whose fields are exactly the non-empty provider fields in the file. A file that matches none (or more than one) is `variant_ambiguous`. Keys that are not provider fields are `unknown_fields` unless `--ignore-unknown` is set, in which case those names are skipped and listed as `ignored`. `--if-absent` on a profile that already exists exits 4 and writes nothing. Without `--if-absent`, import of an existing profile replaces its variant, non-secret fields, and secrets as a new secret version (`action: rotated`); its bindings stay, and its running instance is stopped and starts again on the next call. Import does not bind the profile; bind is a separate command. Without `--no-check`, the variant's HTTP checks run before anything is written. A refusal exits 1 and leaves the store unchanged. If a check cannot be reached, the import still exits 0 (`check: unreachable`) and `last_check_ok` stays null. `--no-check` stores the values without a check (`check: skipped`, `last_check_ok` null).
 
 `bindings` prints `user`, then `role` with positions, then `default` — the same order a call is resolved in.
 
