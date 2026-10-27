@@ -1,10 +1,10 @@
 schema_version: 1
 kind: service
 name: yandex-wiki
-version: 1.0.0
+version: 1.1.0
 publisher: keystone-codes
 summary: "Yandex Wiki tools (ya-wiki-mcp 0.3.1) behind Keystone; each person, service or role uses its own account."
-homepage: https://github.com/keystone-codes/stdio-box/tree/yandex-wiki/v1.0.0/packages/yandex-wiki
+homepage: https://github.com/keystone-codes/stdio-box/tree/yandex-wiki/v1.1.0/packages/yandex-wiki
 compat:
   keystone_mcp: ">=0.5.0,<2.0"
   contracts: [upstream-registry/1, identity-assertion/1]

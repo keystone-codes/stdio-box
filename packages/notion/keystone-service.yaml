@@ -1,10 +1,10 @@
 schema_version: 1
 kind: service
 name: notion
-version: 1.0.0
+version: 1.1.0
 publisher: keystone-codes
 summary: "Notion tools (@notionhq/notion-mcp-server 2.5.2) behind Keystone; each person, service or role uses its own Notion integration."
-homepage: https://github.com/keystone-codes/stdio-box/tree/notion/v1.0.0/packages/notion
+homepage: https://github.com/keystone-codes/stdio-box/tree/notion/v1.1.0/packages/notion
 compat:
   keystone_mcp: ">=0.5.0,<2.0"
   contracts: [upstream-registry/1, identity-assertion/1]

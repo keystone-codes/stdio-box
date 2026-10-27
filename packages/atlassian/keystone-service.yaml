@@ -1,10 +1,10 @@
 schema_version: 1
 kind: service
 name: atlassian
-version: 1.0.0
+version: 1.1.0
 publisher: keystone-codes
 summary: "Atlassian (Jira and Confluence) tools (mcp-atlassian 0.23.1) behind Keystone; each person, service or role uses its own account."
-homepage: https://github.com/keystone-codes/stdio-box/tree/atlassian/v1.0.0/packages/atlassian
+homepage: https://github.com/keystone-codes/stdio-box/tree/atlassian/v1.1.0/packages/atlassian
 compat:
   keystone_mcp: ">=0.5.0,<2.0"
   contracts: [upstream-registry/1, identity-assertion/1]
