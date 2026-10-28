@@ -1,10 +1,10 @@
 schema_version: 1
 kind: service
 name: tavily
-version: 1.1.0
+version: 1.1.1
 publisher: keystone-codes
 summary: "Tavily search tools (tavily-mcp 0.2.22) behind Keystone; each person, service or role uses its own API key."
-homepage: https://github.com/keystone-codes/stdio-box/tree/tavily/v1.1.0/packages/tavily
+homepage: https://github.com/keystone-codes/stdio-box/tree/tavily/v1.1.1/packages/tavily
 compat:
   keystone_mcp: ">=0.5.0,<2.0"
   contracts: [upstream-registry/1, identity-assertion/1]
