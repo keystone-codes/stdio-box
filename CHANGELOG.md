@@ -12,7 +12,7 @@
 ### Fixed
 
 - `scripts/pin_digest.py` no longer leaves the `# placeholder until the stdio-box image release records the digest` comment above an `image:` line it has already pinned.
-- `tests/packages/test_notion.py`'s `keystonectl lint` check used to hardcode `/Users/skynet/keystone/keystonectl` and silently skip everywhere else; it now reads the checkout path from `KEYSTONECTL_SRC` and skips loudly when it is not set.
+- `tests/packages/test_notion.py`'s `keystonectl lint` check used to hardcode a developer checkout path and silently skip everywhere else; it now reads the checkout path from `KEYSTONECTL_SRC` and skips loudly when it is not set.
 
 ### CI
 
