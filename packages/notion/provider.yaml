@@ -2,7 +2,7 @@ schema_version: 1
 name: notion
 title: Notion
 server:
-  command: "npx -y @notionhq/notion-mcp-server@2.5.2"
+  command: "npx -y @notionhq/notion-mcp-server@2.6.0"
   bin: notion-mcp-server
   lock: package-lock.json
 fields:

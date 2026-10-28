@@ -70,7 +70,7 @@ def _env(port: int, *, store_volume: str) -> list[str]:
         "-e",
         "BOX_PROVIDER=notion",
         "-e",
-        "BOX_COMMAND=npx -y @notionhq/notion-mcp-server@2.5.2",
+        "BOX_COMMAND=npx -y @notionhq/notion-mcp-server@2.6.0",
         "-e",
         f"BOX_BEARER_TOKEN={BEARER}",
         "-e",
