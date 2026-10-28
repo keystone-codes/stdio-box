@@ -5,6 +5,7 @@
 ### Security
 
 - Package `atlassian` 1.1.1: `fastmcp` (vendored by `mcp-atlassian` 0.23.1) 3.4.8 → 3.4.11 (GHSA-7xgj-8392-5q4r, authorization bypass after transforms) and `certifi` → 2026.10.23. `mcp-atlassian` stays 0.23.1 (no newer upstream release); the lock overrides its transitive `fastmcp`/`certifi` pins.
+- Package `yandex-wiki` 1.1.1: `fastmcp` (vendored by `ya-wiki-mcp` 0.3.1) 4.1.0 → 4.1.4 (GHSA-7xgj-8392-5q4r, GHSA-vqqp-x5qm-5qp4) and `certifi` → 2026.10.23. `ya-wiki-mcp` stays 0.3.1 (no newer upstream release); the lock overrides its transitive `fastmcp`/`certifi` pins.
 
 ## [0.3.1] - 2026-10-28
 

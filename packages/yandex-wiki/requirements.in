@@ -1,1 +1,7 @@
 ya-wiki-mcp==0.3.1
+# ya-wiki-mcp 0.3.1 pins fastmcp>=2.0.0; there is no newer ya-wiki-mcp release yet (checked PyPI,
+# latest is still 0.3.1). Override fastmcp and certifi to the patched versions: fastmcp 4.1.0 has
+# GHSA-7xgj-8392-5q4r (fixed 3.4.10/4.1.2, auth bypass after transforms) and GHSA-vqqp-x5qm-5qp4
+# (fixed 4.1.2, OAuth client issuer binding); 4.1.4 is the latest 4.x release.
+fastmcp==4.1.4
+certifi>=2026.10.23
