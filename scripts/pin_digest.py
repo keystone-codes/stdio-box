@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 IMAGE_NAME = "ghcr.io/keystone-codes/stdio-box"
+_PLACEHOLDER_COMMENT = "# placeholder until the stdio-box image release records the digest"
 _NAME = re.compile(r"^[a-z][a-z0-9_-]{0,30}$")
 _REF = re.compile(
     rf"^{re.escape(IMAGE_NAME)}:"
@@ -246,6 +247,9 @@ def _replace_image(manifest: _Manifest, image_ref: str) -> None:
     lines[image.index] = (
         f"{image.prefix}{image.quote}{image_ref}{image.quote}{image.suffix}{image.newline}"
     )
+    comment_index = image.index - 1
+    if comment_index >= 0 and lines[comment_index].strip() == _PLACEHOLDER_COMMENT:
+        del lines[comment_index]
     _write_text(manifest.path, "".join(lines))
 
 
