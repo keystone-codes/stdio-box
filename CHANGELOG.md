@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-28
+
+### Security
+
+- `mcp` 1.28.1 → 1.30.0 (four known CVEs fixed upstream; none were reachable in this image's code paths, see the 0.3.0 audit notes) and `certifi` → 2026.10.23 (compromised eMudhra root CA advisory).
+- Image: upgraded `libssl3`/`openssl` in the final layer, and the npm CLI vendored by the node build stage (`npm@12.2.1`, plus a patched `undici` 6.29.1) to drop fixable CRITICAL/HIGH findings reported by Trivy (`pacote`, `sigstore`, `picomatch`, `brace-expansion`, `ip-address`, `undici`). Base images stay pinned by digest.
+
+### Fixed
+
+- `scripts/pin_digest.py` no longer leaves the `# placeholder until the stdio-box image release records the digest` comment above an `image:` line it has already pinned.
+- `tests/packages/test_notion.py`'s `keystonectl lint` check used to hardcode `/Users/skynet/keystone/keystonectl` and silently skip everywhere else; it now reads the checkout path from `KEYSTONECTL_SRC` and skips loudly when it is not set.
+
+### CI
+
+- `release-image.yml` scans the built image with Trivy (CRITICAL/HIGH, ignore-unfixed) before tagging the release version, matching keystone-mcp.
+- Added Dependabot for `pip`, `docker`, and `github-actions`.
+
 ## [0.3.0] - 2026-10-27
 
 ### Fixed
