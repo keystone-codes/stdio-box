@@ -52,7 +52,7 @@ def test_lockfile_pins_server_version() -> None:
     lock = json.loads((NOTION / "package-lock.json").read_text(encoding="utf-8"))
     assert lock["lockfileVersion"] == 3
     pkg = lock["packages"]["node_modules/@notionhq/notion-mcp-server"]
-    assert pkg["version"] == "2.5.2"
+    assert pkg["version"] == "2.6.0"
 
 
 def test_keystonectl_lint_manifest() -> None:

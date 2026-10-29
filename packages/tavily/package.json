@@ -2,5 +2,10 @@
   "private": true,
   "dependencies": {
     "tavily-mcp": "0.2.22"
+  },
+  "overrides": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "body-parser": "2.4.0",
+    "fast-uri": "3.1.9"
   }
 }

@@ -1,6 +1,9 @@
 {
   "private": true,
   "dependencies": {
-    "@notionhq/notion-mcp-server": "2.5.2"
+    "@notionhq/notion-mcp-server": "2.6.0"
+  },
+  "overrides": {
+    "fast-uri": "3.1.9"
   }
 }

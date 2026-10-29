@@ -1,6 +1,6 @@
 # Notion provider package
 
-Notion MCP tools (`@notionhq/notion-mcp-server` 2.5.2) behind Keystone. Each person, service, or role uses its own Notion integration token. The server code is installed from the lock file into the box `cache` volume on first start; it is not baked into the image.
+Notion MCP tools (`@notionhq/notion-mcp-server` 2.6.0) behind Keystone. Each person, service, or role uses its own Notion integration token. The server code is installed from the lock file into the box `cache` volume on first start; it is not baked into the image.
 
 ## Install
 
@@ -8,7 +8,7 @@ Notion MCP tools (`@notionhq/notion-mcp-server` 2.5.2) behind Keystone. Each per
 keystonectl service apply notion
 ```
 
-Answer the domain and certificate questions (or use `--defer-public` if the public URL is not ready yet). The manifest pins the shared `stdio-box` image and sets `BOX_PROVIDER=notion` and `BOX_COMMAND=npx -y @notionhq/notion-mcp-server@2.5.2`.
+Answer the domain and certificate questions (or use `--defer-public` if the public URL is not ready yet). The manifest pins the shared `stdio-box` image and sets `BOX_PROVIDER=notion` and `BOX_COMMAND=npx -y @notionhq/notion-mcp-server@2.6.0`.
 
 ## Credential variant
 

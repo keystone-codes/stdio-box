@@ -1,10 +1,10 @@
 schema_version: 1
 kind: service
 name: notion
-version: 1.1.0
+version: 1.1.1
 publisher: keystone-codes
-summary: "Notion tools (@notionhq/notion-mcp-server 2.5.2) behind Keystone; each person, service or role uses its own Notion integration."
-homepage: https://github.com/keystone-codes/stdio-box/tree/notion/v1.1.0/packages/notion
+summary: "Notion tools (@notionhq/notion-mcp-server 2.6.0) behind Keystone; each person, service or role uses its own Notion integration."
+homepage: https://github.com/keystone-codes/stdio-box/tree/notion/v1.1.1/packages/notion
 compat:
   keystone_mcp: ">=0.5.0,<2.0"
   contracts: [upstream-registry/1, identity-assertion/1]
@@ -87,7 +87,7 @@ containers:
         default: "notion"
         description: "Provider directory inside the stdio-box image."
       - name: BOX_COMMAND
-        default: "npx -y @notionhq/notion-mcp-server@2.5.2"
+        default: "npx -y @notionhq/notion-mcp-server@2.6.0"
         description: "Server to run. The package and version must match the provider lock file."
     secrets:
       - name: BOX_STORE_KEY

@@ -1,1 +1,7 @@
 mcp-atlassian==0.23.1
+# mcp-atlassian 0.23.1 pins fastmcp<4.0.0,>=3.2.4; there is no newer mcp-atlassian release yet
+# (checked PyPI, latest is still 0.23.1). Override fastmcp and certifi to the patched versions
+# fastmcp 3.4.8 has GHSA-7xgj-8392-5q4r (authorization bypass after transforms); 3.4.11 is the
+# latest 3.x release and still satisfies mcp-atlassian's constraint.
+fastmcp==3.4.11
+certifi>=2026.10.23

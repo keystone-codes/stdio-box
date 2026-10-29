@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+Packages atlassian, notion, tavily, yandex-tracker and yandex-wiki 1.1.1 run on image 0.3.1. `yandex-tracker` 1.1.1 changes only the image.
+
+### Security
+
+- Package `atlassian` 1.1.1: `fastmcp` (vendored by `mcp-atlassian` 0.23.1) 3.4.8 → 3.4.11 (GHSA-7xgj-8392-5q4r, authorization bypass after transforms) and `certifi` → 2026.10.23. `mcp-atlassian` stays 0.23.1 (no newer upstream release); the lock overrides its transitive `fastmcp`/`certifi` pins.
+- Package `yandex-wiki` 1.1.1: `fastmcp` (vendored by `ya-wiki-mcp` 0.3.1) 4.1.0 → 4.1.4 (GHSA-7xgj-8392-5q4r, GHSA-vqqp-x5qm-5qp4) and `certifi` → 2026.10.23. `ya-wiki-mcp` stays 0.3.1 (no newer upstream release); the lock overrides its transitive `fastmcp`/`certifi` pins.
+- Package `notion` 1.1.1: `@notionhq/notion-mcp-server` 2.5.2 → 2.6.0 (fixes `zod` and `body-parser` findings) plus a `fast-uri` 3.0.1 → 3.1.9 override (GHSA-w74x-v6f9-j3xg and others). `npm audit --omit=dev` is clean.
+- Package `tavily` 1.1.1: `tavily-mcp` stays 0.2.22 (no newer upstream release); `package.json` overrides its transitive `@modelcontextprotocol/sdk` (→ 1.32.2, GHSA-6qxp-vccf-f47h and five more advisories), `body-parser` (→ 2.4.0, GHSA-27r3-jxmh-p828), and `fast-uri` (→ 3.1.9). `npm audit --omit=dev` is clean.
+
 ## [0.3.1] - 2026-10-28
 
 ### Security
