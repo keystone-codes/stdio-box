@@ -1,12 +1,12 @@
 [project]
 name = "stdio-box"
-version = "0.3.0"
+version = "0.3.1"
 description = "One container image that runs a third-party MCP stdio server behind Keystone."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
 dependencies = [
-    "mcp==1.28.1",
+    "mcp==1.30.0",
     "starlette",
     "uvicorn",
     "pyjwt>=2.8",

@@ -19,11 +19,25 @@ FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef302
 # node:22-bookworm-slim
 FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS node
 
+# The bundled npm (10.9.9) carries vulnerable copies of pacote, sigstore,
+# picomatch, brace-expansion, and ip-address. Pin a newer npm release that
+# updates its own dependency tree to fixed versions. 12.2.1 still vendors a
+# vulnerable undici (CVE-2026-109383/109869/87018, fixed in 6.29.1); swap in
+# the patched release until an npm release bundles it.
+RUN npm install -g npm@12.2.1 \
+    && cd /tmp \
+    && npm pack undici@6.29.1 \
+    && rm -rf /usr/local/lib/node_modules/npm/node_modules/undici \
+    && tar -xzf undici-6.29.1.tgz -C /tmp \
+    && mv /tmp/package /usr/local/lib/node_modules/npm/node_modules/undici \
+    && rm -f /tmp/undici-6.29.1.tgz
+
 # python:3.12-slim-bookworm
 FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tini curl \
+    && apt-get install -y --only-upgrade libssl3 openssl \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 box \
     && useradd --uid 10001 --gid 10001 \

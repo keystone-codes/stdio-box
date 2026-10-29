@@ -94,8 +94,13 @@ def test_pin_real_manifests_change_only_the_image_line(tmp_path: Path) -> None:
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.splitlines() == expected
     assert (tmp_path / "IMAGE").read_bytes() == f"{_REF}\n".encode()
+    placeholder_text = b"# placeholder until the stdio-box image release records the digest"
     for dest, old in before.items():
         new = dest.read_bytes()
+        assert placeholder_text not in old, (
+            "fixture carries the placeholder comment again; "
+            "see test_pin_drops_the_placeholder_comment_above_the_image_line instead"
+        )
         assert _changed_lines(old, new) == [
             index
             for index, line in enumerate(old.splitlines(keepends=True))
@@ -103,6 +108,7 @@ def test_pin_real_manifests_change_only_the_image_line(tmp_path: Path) -> None:
         ]
         assert _REF.encode() in new
         assert (b'"' + _REF.encode() + b'"') in new
+        assert placeholder_text not in new
         assert (dest.parent / "README.md").read_bytes() == b"leave me\n"
 
 
@@ -158,6 +164,65 @@ def test_explicit_package_on_another_image_changes_only_that_line(tmp_path: Path
         if re.match(rb"^[ \t]*image:[ \t]", line)
     ]
     assert manifest.read_bytes().splitlines()[0] == b"# keep otherbox"
+
+
+def test_pin_drops_the_placeholder_comment_above_the_image_line(tmp_path: Path) -> None:
+    _pyproject(tmp_path)
+    (tmp_path / "IMAGE").write_text("keep\n", encoding="utf-8")
+    package = tmp_path / "packages" / "atlassian"
+    package.mkdir(parents=True)
+    manifest = package / "keystone-service.yaml"
+    old = f"ghcr.io/keystone-codes/stdio-box:0.1.0@sha256:{_ZERO}"
+    manifest.write_text(
+        "schema_version: 1\n"
+        "name: atlassian\n"
+        "version: 1.0.0\n"
+        "containers:\n"
+        "  mcp:\n"
+        "    # placeholder until the stdio-box image release records the digest\n"
+        f'    image: "{old}"\n'
+        "needs: []\n",
+        encoding="utf-8",
+    )
+    completed = _run(tmp_path, _REF)
+    assert completed.returncode == 0, completed.stderr
+    text = manifest.read_text(encoding="utf-8")
+    assert "placeholder until the stdio-box image release records the digest" not in text
+    assert f'image: "{_REF}"' in text
+    assert text == (
+        "schema_version: 1\n"
+        "name: atlassian\n"
+        "version: 1.0.0\n"
+        "containers:\n"
+        "  mcp:\n"
+        f'    image: "{_REF}"\n'
+        "needs: []\n"
+    )
+
+
+def test_pin_keeps_a_comment_that_is_not_the_exact_placeholder(tmp_path: Path) -> None:
+    _pyproject(tmp_path)
+    (tmp_path / "IMAGE").write_text("keep\n", encoding="utf-8")
+    package = tmp_path / "packages" / "atlassian"
+    package.mkdir(parents=True)
+    manifest = package / "keystone-service.yaml"
+    old = f"ghcr.io/keystone-codes/stdio-box:0.1.0@sha256:{_ZERO}"
+    manifest.write_text(
+        "schema_version: 1\n"
+        "name: atlassian\n"
+        "version: 1.0.0\n"
+        "containers:\n"
+        "  mcp:\n"
+        "    # pinned by release automation, do not edit by hand\n"
+        f'    image: "{old}"\n'
+        "needs: []\n",
+        encoding="utf-8",
+    )
+    completed = _run(tmp_path, _REF)
+    assert completed.returncode == 0, completed.stderr
+    text = manifest.read_text(encoding="utf-8")
+    assert "# pinned by release automation, do not edit by hand" in text
+    assert f'image: "{_REF}"' in text
 
 
 def test_pin_preserves_crlf_around_the_image_line(tmp_path: Path) -> None:

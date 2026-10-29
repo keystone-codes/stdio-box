@@ -1,6 +1,7 @@
 """Notion provider package checks (shared catalog tests live in test_packages.py from S09)."""
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -15,7 +16,6 @@ from stdio_box.provider import load_provider
 
 ROOT = Path(__file__).resolve().parents[2]
 NOTION = ROOT / "packages" / "notion"
-KEYSTONectl = Path("/Users/skynet/keystone/keystonectl")
 _PUBLISHED = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
@@ -56,11 +56,17 @@ def test_lockfile_pins_server_version() -> None:
 
 
 def test_keystonectl_lint_manifest() -> None:
-    if not (KEYSTONectl / "pyproject.toml").is_file():
-        return
+    src = os.environ.get("KEYSTONECTL_SRC")
+    if not src:
+        pytest.skip(
+            "KEYSTONECTL_SRC is not set; point it at a keystonectl checkout to run this test"
+        )
+    keystonectl = Path(src)
+    if not (keystonectl / "pyproject.toml").is_file():
+        pytest.skip(f"KEYSTONECTL_SRC={keystonectl} has no pyproject.toml")
     result = subprocess.run(
         ["uv", "run", "keystonectl", "lint", str(NOTION / "keystone-service.yaml")],
-        cwd=KEYSTONectl,
+        cwd=keystonectl,
         check=False,
         capture_output=True,
         text=True,
