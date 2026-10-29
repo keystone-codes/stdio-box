@@ -17,7 +17,7 @@ RUN uv sync --frozen --no-dev --no-editable
 FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
 
 # node:22-bookworm-slim
-FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS node
+FROM node:25-bookworm-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS node
 
 # The bundled npm (10.9.9) carries vulnerable copies of pacote, sigstore,
 # picomatch, brace-expansion, and ip-address. Pin a newer npm release that
