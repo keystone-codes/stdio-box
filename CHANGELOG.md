@@ -1,8 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.2] - 2026-11-03
 
-Packages atlassian and yandex-wiki 1.1.2, notion, tavily and yandex-tracker 1.1.1 run on image 0.3.1. `yandex-tracker` 1.1.1 changes only the image.
+Packages atlassian and yandex-wiki 1.1.3, notion, tavily and yandex-tracker 1.1.2 run on image 0.3.2. notion, tavily and yandex-tracker 1.1.2 change only the image.
 
 ### Security
 
@@ -10,7 +10,11 @@ Packages atlassian and yandex-wiki 1.1.2, notion, tavily and yandex-tracker 1.1.
 - Package `yandex-wiki` 1.1.1: `fastmcp` (vendored by `ya-wiki-mcp` 0.3.1) 4.1.0 → 4.1.4 (GHSA-7xgj-8392-5q4r, GHSA-vqqp-x5qm-5qp4) and `certifi` → 2026.10.23. `ya-wiki-mcp` stays 0.3.1 (no newer upstream release); the lock overrides its transitive `fastmcp`/`certifi` pins.
 - Package `notion` 1.1.1: `@notionhq/notion-mcp-server` 2.5.2 → 2.6.0 (fixes `zod` and `body-parser` findings) plus a `fast-uri` 3.0.1 → 3.1.9 override (GHSA-w74x-v6f9-j3xg and others). `npm audit --omit=dev` is clean.
 - Package `tavily` 1.1.1: `tavily-mcp` stays 0.2.22 (no newer upstream release); `package.json` overrides its transitive `@modelcontextprotocol/sdk` (→ 1.32.2, GHSA-6qxp-vccf-f47h and five more advisories), `body-parser` (→ 2.4.0, GHSA-27r3-jxmh-p828), and `fast-uri` (→ 3.1.9). `npm audit --omit=dev` is clean.
-- Packages `atlassian` and `yandex-wiki` 1.1.2: `joserfc` 1.7.5 → 1.7.7 (GHSA-9pg5-8c7x-5hfx). Image unchanged (0.3.1).
+- Packages `atlassian` and `yandex-wiki` 1.1.2 locked `joserfc` 1.7.5 → 1.7.7 (GHSA-9pg5-8c7x-5hfx), but box installs a package's dependencies from the image's own copy of `packages/<pkg>/requirements.txt`, not from the package's tag; on image 0.3.1 both packages still installed joserfc 1.7.5. The fix reaches users with image 0.3.2, in packages `atlassian` and `yandex-wiki` 1.1.3.
+
+### Notes
+
+- Box installs a package's dependencies from the copy of `packages/<pkg>/requirements.txt` baked into the image. A package release that changes only its lock reaches users only with the next image release.
 
 ## [0.3.1] - 2026-10-28
 
