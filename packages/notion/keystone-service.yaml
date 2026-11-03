@@ -80,7 +80,7 @@ identity:
   audience_env: BOX_IDENTITY_AUDIENCE
 containers:
   mcp:
-    image: "ghcr.io/keystone-codes/stdio-box:0.3.1@sha256:e73fe9b39fd6aafdb22da96609fd593b710ad1e2491df02dd097e5fec4a65c97"
+    image: "ghcr.io/keystone-codes/stdio-box:0.3.2@sha256:93cffdc0c14ce939ff75d38d34fd03f8326a3ed796ce256c8ff0a02f9ce4d37e"
     port: 8081
     env:
       - name: BOX_PROVIDER
