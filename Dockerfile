@@ -14,7 +14,7 @@ COPY schemas ./schemas
 RUN uv sync --frozen --no-dev --no-editable
 
 # ghcr.io/astral-sh/uv:0.13.1 — distroless image, binary at /uv
-FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS uv
 
 # node:22-bookworm-slim
 FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS node
