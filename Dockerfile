@@ -17,7 +17,7 @@ RUN uv sync --frozen --no-dev --no-editable
 FROM ghcr.io/astral-sh/uv:0.13.1@sha256:4a1f3666816dafadd20ceb71eac9a7d56d7ef30279f7d64048519ab901ada336 AS uv
 
 # node:22-bookworm-slim
-FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS node
+FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS node
 
 # The bundled npm (10.9.9) carries vulnerable copies of pacote, sigstore,
 # picomatch, brace-expansion, and ip-address. Pin a newer npm release that
@@ -33,11 +33,11 @@ RUN npm install -g npm@12.2.1 \
     && rm -f /tmp/undici-6.29.1.tgz
 
 # python:3.12-slim-bookworm
-FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258
+FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tini curl \
-    && apt-get install -y --only-upgrade libssl3 openssl \
+    && apt-get install -y --only-upgrade apt libssl3 openssl \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 box \
     && useradd --uid 10001 --gid 10001 \

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.3] - 2026-11-11
+
+Packages atlassian and yandex-wiki 1.1.4, notion, tavily and yandex-tracker 1.1.3 run on image 0.3.3. Image only; no dependency changes in packages.
+
+### Security
+
+- Image: `apt` 2.6.1 → 2.6.2 in the box image (CVE-2026-109518). The `node:22-bookworm-slim` and `python:3.12-slim-bookworm` bases are repinned to current builds with `apt` 2.6.2, and the final layer now also upgrades `apt` explicitly alongside `libssl3`/`openssl`.
+
 ## [0.3.2] - 2026-11-03
 
 Packages atlassian and yandex-wiki 1.1.3, notion, tavily and yandex-tracker 1.1.2 run on image 0.3.2. notion, tavily and yandex-tracker 1.1.2 change only the image.

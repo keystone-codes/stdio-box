@@ -1,6 +1,6 @@
 [project]
 name = "stdio-box"
-version = "0.3.2"
+version = "0.3.3"
 description = "One container image that runs a third-party MCP stdio server behind Keystone."
 readme = "README.md"
 license = { file = "LICENSE" }
