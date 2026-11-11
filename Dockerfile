@@ -33,7 +33,7 @@ RUN npm install -g npm@12.2.1 \
     && rm -f /tmp/undici-6.29.1.tgz
 
 # python:3.12-slim-bookworm
-FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
+FROM python:3.15-slim-bookworm@sha256:96599df822d0e1c6bb700014a05c7f3c8cabc6e0f7ff3c4f9f69cee033b4b5d9
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tini curl \
